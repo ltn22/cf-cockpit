@@ -1,79 +1,74 @@
 import asyncio
 import aiocoap
 from pycoreconf import CORECONFModel
-import cbor2
+import cbor2 as cbor
 import logging
 import json
 
 logging.basicConfig(level=logging.INFO)
 logging.getLogger("coap").setLevel(logging.INFO)
 
-async def main():
-    print("Initializing PyCoreConf Model...")
-    model = CORECONFModel("coreconf-m2m@2026-03-08.sid")
-    db = model.loadDB()
-    
-    # Get the SID using _resolve_path()
-    measurement_xpath = "/coreconf-m2m:measurements/measurement"
+class RemoteDevice:
+    def __init__(self):
+        self.model = None
+        self.db = None
 
-    try:
-        sid, key = db._resolve_path(measurement_xpath)
-    except Exception as e:
-        print(f"Error resolving path: {e}")
-        return
-
-    if not sid:
-        print(f"Could not find SID for {measurement_xpath}")
-        return
+    async def bootstrap_db(self, server_host: str, server_port: int, yang_model_name: str):
+        print(f"Initializing PyCoreConf Model with {yang_model_name}...")
         
-    print("Creating CoAP context...")
-    protocol = await aiocoap.Context.create_client_context()
+        sid_file = yang_model_name if yang_model_name.endswith('.sid') else f"{yang_model_name}.sid"
+        self.model = CORECONFModel(sid_file)
+        
+        # Get module base name to construct xpath (removes @<date> and .sid extension)
+        module_name = yang_model_name.split('@')[0].replace(".sid", "")
+        
+        # bootstrap 
+        measurements_sid = self.model.sids[f"/{module_name}:measurements/measurement"]
+            
+        print("Creating CoAP request...")
+        protocol = await aiocoap.Context.create_client_context()
+        
+        port_str = f":{server_port}" if server_port else ""
+        uri = f"coap://{server_host}{port_str}/c?d=0"
+        
+        request = aiocoap.Message(
+            code=aiocoap.FETCH, 
+            uri=uri,
+            payload=cbor.dumps(measurements_sid)
+        )
+        request.opt.content_format = 142
+        request.opt.accept = 142
 
-    print("Constructing FETCH request for coap://xlapak.touta.in/c?d=0")
-    # Using FETCH method. The payload is a CBOR-encoded array containing the SID.
-    payload = cbor2.dumps([sid])
+        try:
+            response = await asyncio.wait_for(protocol.request(request).response, timeout=5.0)
+        except asyncio.TimeoutError:
+            logging.error("Timeout: The CoAP request timed out after 5 seconds.")
+            return
+        except Exception as e:
+            logging.error(f"Failed to fetch resource: {e}")
+            return
+
+        try:
+            self.db = self.model.loadDB(response.payload)
+        except Exception as e:
+            logging.error(f"PyCoreConf Exception loading DB: {e}", exc_info=True)
+
+import argparse
+
+async def main():
+    parser = argparse.ArgumentParser(description="Fetch PyCoreConf Database over CoAP")
+    parser.add_argument("--host", type=str, default="[::1]", help="CoAP Server Host (default: [::1])")
+    parser.add_argument("--port", type=int, default=None, help="CoAP Server Port (default: default CoAP port)")
+    parser.add_argument("--model", type=str, default="coreconf-m2m@2026-03-08", help="YANG Model Name (default: coreconf-m2m@2026-03-08)")
     
-    request = aiocoap.Message(
-        code=aiocoap.FETCH, 
-        uri='coap://xlapak.touta.in/c?d=0',
-        payload=payload
+    args = parser.parse_args()
+
+    device = RemoteDevice()
+    await device.bootstrap_db(
+        server_host=args.host,
+        server_port=args.port,
+        yang_model_name=args.model
     )
-    request.opt.content_format = 142
-    request.opt.accept = 142
-
-    try:
-        print("Sending request with 5s timeout...")
-        response = await asyncio.wait_for(protocol.request(request).response, timeout=5.0)
-    except asyncio.TimeoutError:
-        print("Timeout: The CoAP request timed out after 5 seconds.")
-        return
-    except Exception as e:
-        print(f"Failed to fetch resource: {e}")
-        return
-
-    print("Response Code:", response.code)
-    try:
-        print("Response Payload Hex:", response.payload.hex())
-    except Exception as e:
-        print("Error getting payload hex:", e)
-
-    try:
-        cbor_data = cbor2.loads(response.payload)
-        print("Raw CBOR data:", cbor_data)
-    except Exception as e:
-        print("Could not decode raw CBOR:", e)
-
-    print("\n--- Parsing PyCoreConf Database ---")
-    try:
-        db = model.loadDB(response.payload)
-        print("JSON Dump from pycoreconf DB:")
-        print(json.dumps(db, indent=2))
-
-    except Exception as e:
-        print("\nPyCoreConf Exception loading DB:")
-        print(e)
-        import traceback
-        traceback.print_exc()
 
 if __name__ == "__main__":
     asyncio.run(main())
