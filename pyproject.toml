@@ -3,7 +3,7 @@ name = "cockpit2"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = [
     "aiocoap>=0.4.17",
     "cbor2>=5.8.0",
