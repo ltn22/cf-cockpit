@@ -8,7 +8,6 @@ dependencies = [
     "aiocoap>=0.4.17",
     "cbor2>=5.8.0",
     "pycoreconf",
-    "textual>=0.50.0",
 ]
 
 [tool.uv.sources]

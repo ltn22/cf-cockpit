@@ -3,18 +3,16 @@ import aiocoap
 from pycoreconf import CORECONFModel
 import cbor2 as cbor
 import logging
-import json
 import time
-from datetime import datetime
 import argparse
-import re
-
-from textual.app import App, ComposeResult
-from textual.containers import Grid, Horizontal, Vertical
-from textual.widgets import Header, Footer, Static, Button, Label
+import threading
+import tkinter as tk
+from tkinter import ttk
+from queue import Queue
 
 logging.basicConfig(level=logging.INFO)
 logging.getLogger("coap").setLevel(logging.INFO)
+
 
 class RemoteDevice:
     def __init__(self, server_host: str, server_port: int, yang_model_name: str):
@@ -33,16 +31,17 @@ class RemoteDevice:
     async def fetch_db(self):
         module_name = self.yang_model_name.split('@')[0].replace(".sid", "")
         xpath = f"/{module_name}:measurements/measurement"
-        
+
         if xpath not in self.model.sids:
+            print(f"[fetch_db] xpath not in sids: {xpath}")
             return False
 
         measurements_sid = self.model.sids[xpath]
         port_str = f":{self.server_port}" if self.server_port else ""
         uri = f"coap://{self.server_host}{port_str}/c?d=0"
-        
+
         request = aiocoap.Message(
-            code=aiocoap.FETCH, 
+            code=aiocoap.FETCH,
             uri=uri,
             payload=cbor.dumps(measurements_sid)
         )
@@ -52,166 +51,211 @@ class RemoteDevice:
         try:
             response = await asyncio.wait_for(self.protocol.request(request).response, timeout=5.0)
             self.db = self.model.loadDB(response.payload)
-        except Exception:
+        except Exception as e:
+            print(f"[fetch_db] CoAP error: {e}")
             return False
-        
+
         db_xpath = f"{module_name}:measurements/measurement"
 
         try:
             filters = self.db.get_keys(db_xpath)
-        except Exception:
+        except Exception as e:
+            print(f"[fetch_db] get_keys error: {e}")
             return False
 
         for f in filters:
-            print (f)
+            print(f)
             self.db[db_xpath + f] = {'internal': {'last-update': int(time.time())}}
-        
+
         return True
 
-class MeasurementCard(Static):
-    """A widget to display a single measurement."""
-    
-    def __init__(self, key_filter: str, m_type: str, initial_value: str, last_up: int):
-        super().__init__(classes="card")
+
+class MeasurementCard(tk.Frame):
+    def __init__(self, parent, key_filter: str, m_type: str, initial_value: str, last_up: int):
+        super().__init__(parent, relief=tk.RIDGE, borderwidth=2, padx=8, pady=8, bg="#1e1e2e")
         self.key_filter = key_filter
-        self.safe_id = re.sub(r'[^a-zA-Z0-9_-]', '_', key_filter)
-        self.m_type = m_type
-        self.val_str = initial_value
         self.last_up = last_up
 
-    def compose(self) -> ComposeResult:
-        with Vertical():
-            yield Label(self.m_type.upper(), classes="title")
-            self.val_label = Label(self.val_str, id=f"val_{self.safe_id}", classes="value")
-            yield self.val_label
-            with Horizontal(classes="buttons"):
-                yield Button("Refresh", id=f"refresh_{self.safe_id}", variant="primary")
-                yield Button("Stats", id=f"stats_{self.safe_id}")
-                yield Button("Follow", id=f"follow_{self.safe_id}")
+        tk.Label(self, text=m_type.upper(), font=('Arial', 10, 'bold'),
+                 fg='white', bg='#1e1e2e').pack()
+
+        self.val_label = tk.Label(self, text=initial_value,
+                                  font=('Arial', 18, 'bold'), fg='yellow', bg='#1e1e2e')
+        self.val_label.pack(pady=6)
+
+        btn_frame = tk.Frame(self, bg='#1e1e2e')
+        btn_frame.pack()
+        tk.Button(btn_frame, text="Refresh", bg='#3a86ff', fg='white',
+                  command=self._on_refresh).pack(side=tk.LEFT, padx=2)
+        tk.Button(btn_frame, text="Stats", bg='#444', fg='white').pack(side=tk.LEFT, padx=2)
+        tk.Button(btn_frame, text="Follow", bg='#444', fg='white').pack(side=tk.LEFT, padx=2)
+
+        self._refresh_callback = None
+
+    def set_refresh_callback(self, cb):
+        self._refresh_callback = cb
+
+    def _on_refresh(self):
+        if self._refresh_callback:
+            self._refresh_callback()
 
     def update_data(self, display_text: str, last_up: int):
-        self.val_str = display_text
+        self.val_label.config(text=display_text)
         self.last_up = last_up
-        self.val_label.update(display_text)
 
     def check_timeout(self, current_time: int):
         if self.last_up > 0 and (current_time - self.last_up) > 300:
-            self.val_label.update("---")
+            self.val_label.config(text='---')
 
 
-class CockpitDashboardApp(App):
-    TITLE = "Cockpit2 Dashboard"
-    CSS = """
-    Grid {
-        grid-size: 3;
-        grid-gutter: 1 2;
-        padding: 1;
-    }
-    
-    .card {
-        height: 12;
-        border: solid green;
-        padding: 1;
-    }
-    
-    .title {
-        text-align: center;
-        text-style: bold;
-        width: 100%;
-        margin-bottom: 1;
-    }
-    
-    .value {
-        text-align: center;
-        content-align: center middle;
-        text-style: bold;
-        color: yellow;
-        width: 100%;
-        height: 3;
-    }
-    
-    .buttons {
-        align: center middle;
-        height: 3;
-        margin-top: 1;
-    }
-    
-    Button {
-        margin: 0 1;
-    }
-    """
+class CockpitDashboardApp:
+    COLS = 3
 
     def __init__(self, device: RemoteDevice):
-        super().__init__()
         self.device = device
+        self.cards = {}
+        self.queue = Queue()
 
-    def compose(self) -> ComposeResult:
-        yield Header()
-        self.grid = Grid(id="measurement_grid")
-        yield self.grid
-        yield Footer()
+        self.root = tk.Tk()
+        self.root.title("Cockpit2 Dashboard")
+        self.root.configure(bg='#13131f')
+        self.root.geometry("900x600")
 
-    async def on_mount(self) -> None:
+        self._setup_ui()
+
+        # Asyncio loop in background thread
+        self.loop = asyncio.new_event_loop()
+        threading.Thread(target=self._run_loop, daemon=True).start()
+
+        # Init model then first fetch
+        self.root.after(100, self._schedule_init)
+        # Process results queue
+        self.root.after(200, self._process_queue)
+        # Auto-refresh every 5s
+        self.root.after(5000, self._auto_refresh)
+        # Timeout check every 5s
+        self.root.after(5000, self._check_timeouts)
+
+    def _run_loop(self):
+        asyncio.set_event_loop(self.loop)
+        self.loop.run_forever()
+
+    def _schedule_init(self):
+        asyncio.run_coroutine_threadsafe(self._async_init(), self.loop)
+
+    async def _async_init(self):
         await self.device.init_model()
-        self.set_interval(5.0, self.check_timeouts)
-        # Initial Fetch
-        self.run_worker(self.fetch_and_update())
-
-    async def fetch_and_update(self):
         success = await self.device.fetch_db()
-        if success:
-            self.update_ui()
+        print(f"[fetch_and_update] success={success}")
+        self.queue.put(('update', success))
+
+    async def _async_fetch(self):
+        success = await self.device.fetch_db()
+        print(f"[fetch_and_update] success={success}")
+        self.queue.put(('update', success))
+
+    def _process_queue(self):
+        while not self.queue.empty():
+            msg = self.queue.get()
+            if msg[0] == 'update' and msg[1]:
+                self.update_ui()
+        self.root.after(100, self._process_queue)
+
+    def _auto_refresh(self):
+        asyncio.run_coroutine_threadsafe(self._async_fetch(), self.loop)
+        self.root.after(5000, self._auto_refresh)
+
+    def _check_timeouts(self):
+        current_time = int(time.time())
+        for card in self.cards.values():
+            card.check_timeout(current_time)
+        self.root.after(5000, self._check_timeouts)
+
+    def _setup_ui(self):
+        # Header
+        header = tk.Frame(self.root, bg='#2a2a3e', pady=8)
+        header.pack(fill=tk.X)
+        tk.Label(header, text="Cockpit2 Dashboard", font=('Arial', 14, 'bold'),
+                 fg='white', bg='#2a2a3e').pack(side=tk.LEFT, padx=12)
+        self.status_label = tk.Label(header, text="Connecting...", font=('Arial', 10),
+                                      fg='#aaa', bg='#2a2a3e')
+        self.status_label.pack(side=tk.RIGHT, padx=12)
+        tk.Button(header, text="Refresh All", bg='#3a86ff', fg='white',
+                  command=self._manual_refresh).pack(side=tk.RIGHT, padx=6)
+
+        # Scrollable canvas
+        container = tk.Frame(self.root, bg='#13131f')
+        container.pack(fill=tk.BOTH, expand=True)
+
+        canvas = tk.Canvas(container, bg='#13131f', highlightthickness=0)
+        scrollbar = ttk.Scrollbar(container, orient='vertical', command=canvas.yview)
+        self.grid_frame = tk.Frame(canvas, bg='#13131f')
+
+        self.grid_frame.bind('<Configure>',
+            lambda e: canvas.configure(scrollregion=canvas.bbox('all')))
+
+        canvas.create_window((0, 0), window=self.grid_frame, anchor='nw')
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        self._grid_row = 0
+        self._grid_col = 0
+
+    def _manual_refresh(self):
+        self.status_label.config(text="Refreshing...")
+        asyncio.run_coroutine_threadsafe(self._async_fetch(), self.loop)
 
     def update_ui(self):
         if not self.device.db:
+            self.status_label.config(text="No data")
             return
-            
+
         module_name = self.device.yang_model_name.split('@')[0].replace(".sid", "")
-        # The db key format sometimes drops the leading slash internally, handle accordingly
         db_xpath = f"{module_name}:measurements/measurement"
-        
+
         try:
             filters = self.device.db.get_keys(db_xpath)
-        except Exception:
+            print(f"[update_ui] filters={filters}")
+        except Exception as e:
+            print(f"[update_ui] get_keys error: {e}")
+            self.status_label.config(text=f"Error: {e}")
             return
 
         for f in filters:
             measurement_path = db_xpath + f
             try:
                 data = self.device.db[measurement_path]
-                
+
                 m_type = data.get('type', 'Unknown').split(':')[-1]
                 value = data.get('value', '---')
                 unit = data.get('unit', '')
-                
                 internal = data.get('internal', {})
                 last_update = int(internal.get('last-update', 0))
-                
                 display_text = f"{value} {unit}"
-                
-                # Update if exist, otherwise create
-                card_list = self.query(MeasurementCard)
-                card = next((c for c in card_list if c.key_filter == f), None)
-                
-                if card:
-                    card.update_data(display_text, last_update)
+
+                if f in self.cards:
+                    self.cards[f].update_data(display_text, last_update)
                 else:
-                    new_card = MeasurementCard(f, m_type, display_text, last_update)
-                    self.grid.mount(new_card)
-                    
+                    card = MeasurementCard(self.grid_frame, f, m_type, display_text, last_update)
+                    card.set_refresh_callback(self._manual_refresh)
+                    card.grid(row=self._grid_row, column=self._grid_col,
+                              padx=8, pady=8, sticky='nsew')
+                    self.cards[f] = card
+                    self._grid_col += 1
+                    if self._grid_col >= self.COLS:
+                        self._grid_col = 0
+                        self._grid_row += 1
+
             except KeyError:
                 continue
 
-    async def on_button_pressed(self, event: Button.Pressed) -> None:
-        button_id = event.button.id
-        if button_id and button_id.startswith("refresh_"):
-            # Trigger a re-fetch of everything for simplicity
-            self.run_worker(self.fetch_and_update())
+        self.status_label.config(text=f"Updated {time.strftime('%H:%M:%S')}")
 
-    def check_timeouts(self):
-        current_time = int(time.time())
-        for card in self.query(MeasurementCard):
-            card.check_timeout(current_time)
+    def run(self):
+        self.root.mainloop()
+        self.loop.call_soon_threadsafe(self.loop.stop)
 
 
 def main():
@@ -221,7 +265,6 @@ def main():
     parser.add_argument("--model", type=str, default="coreconf-m2m@2026-03-08", help="YANG Model Name")
     args = parser.parse_args()
 
-    # Turn off excessive logging for TUI
     logging.getLogger("coap").setLevel(logging.CRITICAL)
     logging.getLogger().setLevel(logging.CRITICAL)
 
@@ -230,9 +273,10 @@ def main():
         server_port=args.port,
         yang_model_name=args.model
     )
-    
+
     app = CockpitDashboardApp(device)
     app.run()
+
 
 if __name__ == "__main__":
     main()
