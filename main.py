@@ -52,9 +52,21 @@ class RemoteDevice:
         try:
             response = await asyncio.wait_for(self.protocol.request(request).response, timeout=5.0)
             self.db = self.model.loadDB(response.payload)
-            return True
         except Exception:
             return False
+        
+        db_xpath = f"{module_name}:measurements/measurement"
+
+        try:
+            filters = self.db.get_keys(db_xpath)
+        except Exception:
+            return False
+
+        for f in filters:
+            print (f)
+            self.db[db_xpath + f] = {'internal': {'last-update': int(time.time())}}
+        
+        return True
 
 class MeasurementCard(Static):
     """A widget to display a single measurement."""
