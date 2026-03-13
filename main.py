@@ -2,6 +2,7 @@ import asyncio
 import aiocoap
 from pycoreconf import CORECONFModel
 import cbor2 as cbor
+import json
 import logging
 import time
 import argparse
@@ -10,8 +11,8 @@ import tkinter as tk
 from tkinter import ttk
 from queue import Queue
 
-logging.basicConfig(level=logging.INFO)
-logging.getLogger("coap").setLevel(logging.INFO)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s: %(message)s')
+log = logging.getLogger("cockpit")
 
 
 class RemoteDevice:
@@ -25,34 +26,44 @@ class RemoteDevice:
 
     async def init_model(self):
         sid_file = self.yang_model_name if self.yang_model_name.endswith('.sid') else f"{self.yang_model_name}.sid"
+        log.debug("Loading SID file: %s", sid_file)
         self.model = CORECONFModel(sid_file)
+        log.debug("Creating CoAP client context")
         self.protocol = await aiocoap.Context.create_client_context()
+        log.info("CoAP client ready, target: coap://%s", self.server_host + (f":{self.server_port}" if self.server_port else ""))
 
-    async def fetch_db(self):
+    async def bootstrap_db(self):
         module_name = self.yang_model_name.split('@')[0].replace(".sid", "")
         xpath = f"/{module_name}:measurements/measurement"
 
         if xpath not in self.model.sids:
-            print(f"[fetch_db] xpath not in sids: {xpath}")
+            log.error("xpath not found in SIDs: %s", xpath)
             return False
 
         measurements_sid = self.model.sids[xpath]
         port_str = f":{self.server_port}" if self.server_port else ""
         uri = f"coap://{self.server_host}{port_str}/c?d=0"
 
+        log.info("FETCH %s  (SID=%s, content-format=142)", uri, measurements_sid)
+        payload = cbor.dumps(measurements_sid)
+        log.debug("FETCH payload (CBOR hex): %s (%d bytes)", payload.hex(), len(payload))
+
         request = aiocoap.Message(
             code=aiocoap.FETCH,
             uri=uri,
-            payload=cbor.dumps(measurements_sid)
+            payload=payload
         )
         request.opt.content_format = 142
         request.opt.accept = 142
 
         try:
             response = await asyncio.wait_for(self.protocol.request(request).response, timeout=5.0)
+            log.info("Response code: %s  payload: %d bytes", response.code, len(response.payload))
+            log.debug("Response payload (CBOR hex): %s (%d bytes)", response.payload.hex(), len(response.payload))
             self.db = self.model.loadDB(response.payload)
+            log.debug("DB as JSON:\n%s", json.dumps(json.loads(self.db.to_json()), indent=2))
         except Exception as e:
-            print(f"[fetch_db] CoAP error: {e}")
+            log.error("CoAP request failed: %s", e)
             return False
 
         db_xpath = f"{module_name}:measurements/measurement"
@@ -60,12 +71,54 @@ class RemoteDevice:
         try:
             filters = self.db.get_keys(db_xpath)
         except Exception as e:
-            print(f"[fetch_db] get_keys error: {e}")
+            log.error("get_keys failed: %s", e)
             return False
 
+        log.info("Bootstrap: %d measurement(s) found: %s", len(filters), filters)
         for f in filters:
-            print(f)
             self.db[db_xpath + f] = {'internal': {'last-update': int(time.time())}}
+
+        return True
+
+    async def fetch_measurement(self, f: str) -> bool:
+        module_name = self.yang_model_name.split('@')[0].replace(".sid", "")
+        db_xpath = f"{module_name}:measurements/measurement"
+        xpath = f"/{db_xpath}{f}"
+
+        try:
+            target_sid, key_values = self.db._resolve_path(xpath)
+        except (KeyError, ValueError) as e:
+            log.error("fetch_measurement: cannot resolve xpath %s: %s", xpath, e)
+            return False
+
+        port_str = f":{self.server_port}" if self.server_port else ""
+        uri = f"coap://{self.server_host}{port_str}/c"
+
+        instance_id = [target_sid] + key_values
+        log.info("FETCH %s  (instance=%s)", uri, instance_id)
+        payload = cbor.dumps(instance_id)
+        log.debug("FETCH payload (CBOR hex): %s (%d bytes)", payload.hex(), len(payload))
+
+        request = aiocoap.Message(
+            code=aiocoap.FETCH,
+            uri=uri,
+            payload=payload
+        )
+        request.opt.content_format = 142
+        request.opt.accept = 142
+
+        try:
+            response = await asyncio.wait_for(self.protocol.request(request).response, timeout=5.0)
+            log.info("Response code: %s  payload: %d bytes", response.code, len(response.payload))
+            log.debug("Response payload (CBOR hex): %s (%d bytes)", response.payload.hex(), len(response.payload))
+            new_db = self.model.loadDB(response.payload)
+            log.debug("Measurement JSON:\n%s", json.dumps(json.loads(new_db.to_json()), indent=2))
+            data = new_db[db_xpath + f]
+            self.db[db_xpath + f] = data
+            self.db[db_xpath + f] = {'internal': {'last-update': int(time.time())}}
+        except Exception as e:
+            log.error("fetch_measurement failed: %s", e)
+            return False
 
         return True
 
@@ -85,10 +138,16 @@ class MeasurementCard(tk.Frame):
 
         btn_frame = tk.Frame(self, bg='#1e1e2e')
         btn_frame.pack()
-        tk.Button(btn_frame, text="Refresh", bg='#3a86ff', fg='white',
+        tk.Button(btn_frame, text="Refresh", bg='#888', fg='#003080',
+                  activebackground='#999', activeforeground='#003080',
+                  relief=tk.FLAT, padx=6, pady=2,
                   command=self._on_refresh).pack(side=tk.LEFT, padx=2)
-        tk.Button(btn_frame, text="Stats", bg='#444', fg='white').pack(side=tk.LEFT, padx=2)
-        tk.Button(btn_frame, text="Follow", bg='#444', fg='white').pack(side=tk.LEFT, padx=2)
+        tk.Button(btn_frame, text="Stats", bg='#888', fg='#003080',
+                  activebackground='#999', activeforeground='#003080',
+                  relief=tk.FLAT, padx=6, pady=2).pack(side=tk.LEFT, padx=2)
+        tk.Button(btn_frame, text="Follow", bg='#888', fg='#003080',
+                  activebackground='#999', activeforeground='#003080',
+                  relief=tk.FLAT, padx=6, pady=2).pack(side=tk.LEFT, padx=2)
 
         self._refresh_callback = None
 
@@ -131,8 +190,6 @@ class CockpitDashboardApp:
         self.root.after(100, self._schedule_init)
         # Process results queue
         self.root.after(200, self._process_queue)
-        # Auto-refresh every 5s
-        self.root.after(5000, self._auto_refresh)
         # Timeout check every 5s
         self.root.after(5000, self._check_timeouts)
 
@@ -145,25 +202,25 @@ class CockpitDashboardApp:
 
     async def _async_init(self):
         await self.device.init_model()
-        success = await self.device.fetch_db()
-        print(f"[fetch_and_update] success={success}")
+        success = await self.device.bootstrap_db()
+        log.info("Bootstrap %s", "succeeded" if success else "failed")
         self.queue.put(('update', success))
 
-    async def _async_fetch(self):
-        success = await self.device.fetch_db()
-        print(f"[fetch_and_update] success={success}")
-        self.queue.put(('update', success))
+    def _refresh_card(self, f: str):
+        asyncio.run_coroutine_threadsafe(self._async_fetch_measurement(f), self.loop)
+
+    async def _async_fetch_measurement(self, f: str):
+        success = await self.device.fetch_measurement(f)
+        self.queue.put(('refresh', f, success))
 
     def _process_queue(self):
         while not self.queue.empty():
             msg = self.queue.get()
             if msg[0] == 'update' and msg[1]:
                 self.update_ui()
+            elif msg[0] == 'refresh' and msg[2]:
+                self.update_ui()
         self.root.after(100, self._process_queue)
-
-    def _auto_refresh(self):
-        asyncio.run_coroutine_threadsafe(self._async_fetch(), self.loop)
-        self.root.after(5000, self._auto_refresh)
 
     def _check_timeouts(self):
         current_time = int(time.time())
@@ -181,6 +238,8 @@ class CockpitDashboardApp:
                                       fg='#aaa', bg='#2a2a3e')
         self.status_label.pack(side=tk.RIGHT, padx=12)
         tk.Button(header, text="Refresh All", bg='#3a86ff', fg='white',
+                  activebackground='#5a9fff', activeforeground='white',
+                  relief=tk.FLAT, padx=8, pady=2,
                   command=self._manual_refresh).pack(side=tk.RIGHT, padx=6)
 
         # Scrollable canvas
@@ -204,8 +263,7 @@ class CockpitDashboardApp:
         self._grid_col = 0
 
     def _manual_refresh(self):
-        self.status_label.config(text="Refreshing...")
-        asyncio.run_coroutine_threadsafe(self._async_fetch(), self.loop)
+        self.update_ui()
 
     def update_ui(self):
         if not self.device.db:
@@ -217,9 +275,9 @@ class CockpitDashboardApp:
 
         try:
             filters = self.device.db.get_keys(db_xpath)
-            print(f"[update_ui] filters={filters}")
+            log.debug("update_ui: %d filter(s): %s", len(filters), filters)
         except Exception as e:
-            print(f"[update_ui] get_keys error: {e}")
+            log.error("update_ui get_keys failed: %s", e)
             self.status_label.config(text=f"Error: {e}")
             return
 
@@ -229,7 +287,9 @@ class CockpitDashboardApp:
                 data = self.device.db[measurement_path]
 
                 m_type = data.get('type', 'Unknown').split(':')[-1]
-                value = data.get('value', '---')
+                raw = data.get('value')
+                precision = data.get('precision', 0)
+                value = raw / 10**precision if raw is not None else '---'
                 unit = data.get('unit', '')
                 internal = data.get('internal', {})
                 last_update = int(internal.get('last-update', 0))
@@ -239,7 +299,7 @@ class CockpitDashboardApp:
                     self.cards[f].update_data(display_text, last_update)
                 else:
                     card = MeasurementCard(self.grid_frame, f, m_type, display_text, last_update)
-                    card.set_refresh_callback(self._manual_refresh)
+                    card.set_refresh_callback(lambda key=f: self._refresh_card(key))
                     card.grid(row=self._grid_row, column=self._grid_col,
                               padx=8, pady=8, sticky='nsew')
                     self.cards[f] = card
@@ -263,10 +323,18 @@ def main():
     parser.add_argument("--host", type=str, default="[::1]", help="CoAP Server Host (default: [::1])")
     parser.add_argument("--port", type=int, default=None, help="CoAP Server Port")
     parser.add_argument("--model", type=str, default="coreconf-m2m@2026-03-08", help="YANG Model Name")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Verbose network logging")
     args = parser.parse_args()
 
-    logging.getLogger("coap").setLevel(logging.CRITICAL)
-    logging.getLogger().setLevel(logging.CRITICAL)
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+        logging.getLogger("coap").setLevel(logging.DEBUG)
+        logging.getLogger("aiocoap").setLevel(logging.DEBUG)
+    else:
+        logging.getLogger().setLevel(logging.CRITICAL)
+        logging.getLogger("coap").setLevel(logging.CRITICAL)
+        logging.getLogger("aiocoap").setLevel(logging.CRITICAL)
+        log.setLevel(logging.INFO)
 
     device = RemoteDevice(
         server_host=args.host,
