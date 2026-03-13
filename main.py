@@ -23,6 +23,7 @@ class RemoteDevice:
         self.model = None
         self.db = None
         self.protocol = None
+        self._observations = {}  # f -> asyncio.Task
 
     async def init_model(self):
         sid_file = self.yang_model_name if self.yang_model_name.endswith('.sid') else f"{self.yang_model_name}.sid"
@@ -83,7 +84,7 @@ class RemoteDevice:
     async def fetch_measurement(self, f: str) -> bool:
         module_name = self.yang_model_name.split('@')[0].replace(".sid", "")
         db_xpath = f"{module_name}:measurements/measurement"
-        xpath = f"/{db_xpath}{f}"
+        xpath = f"/{db_xpath}{f}/value"
 
         try:
             target_sid, key_values = self.db._resolve_path(xpath)
@@ -114,7 +115,7 @@ class RemoteDevice:
             new_db = self.model.loadDB(response.payload)
             log.debug("Measurement JSON:\n%s", json.dumps(json.loads(new_db.to_json()), indent=2))
             data = new_db[db_xpath + f]
-            self.db[db_xpath + f] = data
+            self.db[db_xpath + f + "/value"] = data
             self.db[db_xpath + f] = {'internal': {'last-update': int(time.time())}}
         except Exception as e:
             log.error("fetch_measurement failed: %s", e)
@@ -122,21 +123,184 @@ class RemoteDevice:
 
         return True
 
+    async def fetch_statistics(self, f: str) -> bool:
+        module_name = self.yang_model_name.split('@')[0].replace(".sid", "")
+        db_xpath = f"{module_name}:measurements/measurement"
+        xpath = f"/{db_xpath}{f}/statistics"
+
+        try:
+            target_sid, key_values = self.db._resolve_path(xpath)
+        except (KeyError, ValueError) as e:
+            log.error("fetch_statistics: cannot resolve xpath %s: %s", xpath, e)
+            return False
+
+        port_str = f":{self.server_port}" if self.server_port else ""
+        uri = f"coap://{self.server_host}{port_str}/c"
+
+        instance_id = [target_sid] + key_values
+        log.info("FETCH %s  (instance=%s)", uri, instance_id)
+        payload = cbor.dumps(instance_id)
+        log.debug("FETCH payload (CBOR hex): %s (%d bytes)", payload.hex(), len(payload))
+
+        request = aiocoap.Message(
+            code=aiocoap.FETCH,
+            uri=uri,
+            payload=payload
+        )
+        request.opt.content_format = 142
+        request.opt.accept = 142
+
+        try:
+            response = await asyncio.wait_for(self.protocol.request(request).response, timeout=5.0)
+            log.info("Response code: %s  payload: %d bytes", response.code, len(response.payload))
+            log.debug("Response payload (CBOR hex): %s (%d bytes)", response.payload.hex(), len(response.payload))
+
+            data = json.loads(self.model.toJSON(response.payload))
+
+            self.db[db_xpath + f] = {'statistics': data[db_xpath + "/statistics"]}
+        except Exception as e:
+            log.error("fetch_statistics failed: %s", e)
+            return False
+
+        return True
+
+    async def observe_threshold(self, f: str, t_min, t_max) -> bool:
+        # TODO: implement CoAP iPATCH to set notification-parameters/t-min and t-max
+        log.info("observe_threshold: f=%s t_min=%s t_max=%s", f, t_min, t_max)
+
+        module_name = self.yang_model_name.split('@')[0].replace(".sid", "")
+        db_xpath = f"{module_name}:measurements/measurement"
+        xpath = f"/{db_xpath}{f}/notification-parameters"
+
+        data = {db_xpath + "/notification-parameters": {"t-min": t_min, "t-max": t_max}}
+
+        payload = self.model.toCORECONF(json.dumps(data))
+
+        log.info("iPATCH %s  payload (%d bytes): %s", xpath, len(payload), payload.hex())
+
+        port_str = f":{self.server_port}" if self.server_port else ""
+        uri = f"coap://{self.server_host}{port_str}/c"
+
+        request = aiocoap.Message(
+            code=aiocoap.numbers.codes.Code(7),  # iPATCH
+            uri=uri,
+            payload=payload
+        )
+        request.opt.content_format = 142
+        request.opt.accept = 142
+        request.opt.observe = 0
+
+        # Annule l'observation précédente sur cette mesure si elle existe
+        if f in self._observations:
+            self._observations[f].cancel()
+
+        obs = self.protocol.request(request)
+        try:
+            first = await asyncio.wait_for(obs.response, timeout=5.0)
+            log.info("observe_threshold: first response %s", first.code)
+        except Exception as e:
+            log.error("observe_threshold: first response failed: %s", e)
+            return False
+
+        self._observations[f] = asyncio.ensure_future(self._watch_observation(f, obs))
+        return True
+
+    async def _watch_observation(self, f: str, obs):
+        log.info("_watch_observation[%s]: started", f)
+        try:
+            async for response in obs.observation:
+                log.info("_watch_observation[%s]: notification %s  payload (%d bytes): %s",
+                         f, response.code, len(response.payload), response.payload.hex())
+        except asyncio.CancelledError:
+            obs.observation.cancel()
+            log.info("_watch_observation[%s]: cancelled", f)
+        except Exception as e:
+            log.error("_watch_observation[%s]: error: %s", f, e)
+
+
+class ThresholdsDialog(tk.Toplevel):
+    def __init__(self, parent, key_filter: str, t_min, t_max, precision: int, unit: str, on_apply):
+        super().__init__(parent)
+        self.title(f"Thresholds — {key_filter}")
+        self.configure(bg='#1e1e2e')
+        self.resizable(False, False)
+        self.grab_set()
+
+        self._on_apply = on_apply
+        self._precision = precision
+        factor = 10 ** precision
+
+        tk.Label(self, text="Threshold configuration", font=('Arial', 11, 'bold'),
+                 fg='white', bg='#1e1e2e').pack(pady=(12, 4))
+        tk.Label(self, text=f"Unit: {unit}  (precision: ×10⁻{precision})",
+                 font=('Arial', 9), fg='#aaa', bg='#1e1e2e').pack(pady=(0, 10))
+
+        for label, attr, raw_val in (('t-min', '_entry_min', t_min), ('t-max', '_entry_max', t_max)):
+            row = tk.Frame(self, bg='#1e1e2e', padx=16, pady=4)
+            row.pack(fill=tk.X)
+            tk.Label(row, text=f"{label} ({unit}):", font=('Arial', 11), fg='#aaccff',
+                     bg='#1e1e2e', width=14, anchor='w').pack(side=tk.LEFT)
+            entry = tk.Entry(row, font=('Arial', 11), bg='#2a2a3e', fg='white',
+                             insertbackground='white', width=12)
+            if raw_val is not None:
+                entry.insert(0, str(raw_val / factor))
+            entry.pack(side=tk.LEFT, padx=8)
+            setattr(self, attr, entry)
+
+        self._err_label = tk.Label(self, text='', font=('Arial', 9), fg='#ff6666', bg='#1e1e2e')
+        self._err_label.pack()
+
+        btn_row = tk.Frame(self, bg='#1e1e2e', pady=12)
+        btn_row.pack()
+        tk.Button(btn_row, text="Apply", bg='#3a86ff', fg='white',
+                  activebackground='#5a9fff', activeforeground='white',
+                  relief=tk.FLAT, padx=12, pady=4,
+                  command=self._apply).pack(side=tk.LEFT, padx=6)
+        tk.Button(btn_row, text="Cancel", bg='#555', fg='white',
+                  activebackground='#666', activeforeground='white',
+                  relief=tk.FLAT, padx=12, pady=4,
+                  command=self.destroy).pack(side=tk.LEFT, padx=6)
+
+        self.update_idletasks()
+        x = parent.winfo_x() + (parent.winfo_width() - self.winfo_width()) // 2
+        y = parent.winfo_y() + (parent.winfo_height() - self.winfo_height()) // 2
+        self.geometry(f"+{x}+{y}")
+
+    def _apply(self):
+        factor = 10 ** self._precision
+        t_min_raw = t_max_raw = None
+        try:
+            s = self._entry_min.get().strip()
+            if s:
+                t_min_raw = int(float(s) * factor)
+            s = self._entry_max.get().strip()
+            if s:
+                t_max_raw = int(float(s) * factor)
+        except ValueError:
+            self._err_label.config(text="Invalid value — use numbers only.")
+            return
+        self._on_apply(t_min_raw, t_max_raw)
+        self.destroy()
+
 
 class MeasurementCard(tk.Frame):
     def __init__(self, parent, key_filter: str, m_type: str, initial_value: str, last_up: int):
-        super().__init__(parent, relief=tk.RIDGE, borderwidth=2, padx=8, pady=8, bg="#1e1e2e")
+        super().__init__(parent, relief=tk.RIDGE, borderwidth=2, bg="#1e1e2e")
         self.key_filter = key_filter
         self.last_up = last_up
 
-        tk.Label(self, text=m_type.upper(), font=('Arial', 10, 'bold'),
+        # Left: type label, value, buttons
+        left = tk.Frame(self, bg='#1e1e2e', padx=8, pady=8)
+        left.pack(side=tk.LEFT, fill=tk.BOTH)
+
+        tk.Label(left, text=m_type.upper(), font=('Arial', 10, 'bold'),
                  fg='white', bg='#1e1e2e').pack()
 
-        self.val_label = tk.Label(self, text=initial_value,
+        self.val_label = tk.Label(left, text=initial_value,
                                   font=('Arial', 18, 'bold'), fg='yellow', bg='#1e1e2e')
         self.val_label.pack(pady=6)
 
-        btn_frame = tk.Frame(self, bg='#1e1e2e')
+        btn_frame = tk.Frame(left, bg='#1e1e2e')
         btn_frame.pack()
         tk.Button(btn_frame, text="Refresh", bg='#888', fg='#003080',
                   activebackground='#999', activeforeground='#003080',
@@ -144,23 +308,73 @@ class MeasurementCard(tk.Frame):
                   command=self._on_refresh).pack(side=tk.LEFT, padx=2)
         tk.Button(btn_frame, text="Stats", bg='#888', fg='#003080',
                   activebackground='#999', activeforeground='#003080',
-                  relief=tk.FLAT, padx=6, pady=2).pack(side=tk.LEFT, padx=2)
+                  relief=tk.FLAT, padx=6, pady=2,
+                  command=self._on_stats).pack(side=tk.LEFT, padx=2)
+        tk.Button(btn_frame, text="Thresholds", bg='#888', fg='#003080',
+                  activebackground='#999', activeforeground='#003080',
+                  relief=tk.FLAT, padx=6, pady=2,
+                  command=self._on_thresholds).pack(side=tk.LEFT, padx=2)
         tk.Button(btn_frame, text="Follow", bg='#888', fg='#003080',
                   activebackground='#999', activeforeground='#003080',
                   relief=tk.FLAT, padx=6, pady=2).pack(side=tk.LEFT, padx=2)
 
+        # Right: stats panel (hidden until first fetch)
+        self.stats_frame = tk.Frame(self, bg='#003080', padx=8, pady=6)
+        self._stats_labels = {}
+        for field in ('min', 'max', 'mean', 'median', 'σ', 'n'):
+            row = tk.Frame(self.stats_frame, bg='#003080')
+            row.pack(fill=tk.X, pady=1)
+            tk.Label(row, text=f"{field}:", font=('Arial', 10), fg='#aaccff', bg='#003080',
+                     width=6, anchor='w').pack(side=tk.LEFT)
+            lbl = tk.Label(row, text='---', font=('Arial', 10, 'bold'), fg='white', bg='#003080',
+                           anchor='w')
+            lbl.pack(side=tk.LEFT)
+            self._stats_labels[field] = lbl
+
         self._refresh_callback = None
+        self._stats_callback = None
+        self._thresholds_callback = None
 
     def set_refresh_callback(self, cb):
         self._refresh_callback = cb
+
+    def set_stats_callback(self, cb):
+        self._stats_callback = cb
+
+    def set_thresholds_callback(self, cb):
+        self._thresholds_callback = cb
 
     def _on_refresh(self):
         if self._refresh_callback:
             self._refresh_callback()
 
+    def _on_stats(self):
+        if self._stats_callback:
+            self._stats_callback()
+
+    def _on_thresholds(self):
+        if self._thresholds_callback:
+            self._thresholds_callback()
+
     def update_data(self, display_text: str, last_up: int):
         self.val_label.config(text=display_text)
         self.last_up = last_up
+
+    def update_stats(self, stats: dict, precision: int, unit: str):
+        factor = 10 ** precision
+
+        def fmt(raw):
+            return f"{raw / factor} {unit}" if raw is not None else '---'
+
+        self._stats_labels['min'].config(text=fmt(stats.get('min')))
+        self._stats_labels['max'].config(text=fmt(stats.get('max')))
+        self._stats_labels['mean'].config(text=fmt(stats.get('mean')))
+        self._stats_labels['median'].config(text=fmt(stats.get('median')))
+        self._stats_labels['σ'].config(text=fmt(stats.get('stdev')))
+        self._stats_labels['n'].config(text=str(stats.get('sample-count', '---')))
+
+        if not self.stats_frame.winfo_ismapped():
+            self.stats_frame.pack(side=tk.LEFT, fill=tk.Y)
 
     def check_timeout(self, current_time: int):
         if self.last_up > 0 and (current_time - self.last_up) > 300:
@@ -213,14 +427,81 @@ class CockpitDashboardApp:
         success = await self.device.fetch_measurement(f)
         self.queue.put(('refresh', f, success))
 
+    def _stats_card(self, f: str):
+        asyncio.run_coroutine_threadsafe(self._async_fetch_statistics(f), self.loop)
+
+    async def _async_fetch_statistics(self, f: str):
+        success = await self.device.fetch_statistics(f)
+        self.queue.put(('stats', f, success))
+
+    def _thresholds_card(self, f: str):
+        if not self.device.db:
+            return
+        module_name = self.device.yang_model_name.split('@')[0].replace(".sid", "")
+        db_xpath = f"{module_name}:measurements/measurement"
+        try:
+            data = self.device.db[db_xpath + f]
+            precision = data.get('precision', 0)
+            unit = data.get('unit', '')
+            notif = data.get('notification-parameters', {})
+            t_min = notif.get('t-min')
+            t_max = notif.get('t-max')
+        except KeyError:
+            precision, unit, t_min, t_max = 0, '', None, None
+
+        ThresholdsDialog(
+            self.root, f, t_min, t_max, precision, unit,
+            on_apply=lambda mn, mx: asyncio.run_coroutine_threadsafe(
+                self.device.observe_threshold(f, mn, mx), self.loop
+            )
+        )
+
     def _process_queue(self):
         while not self.queue.empty():
             msg = self.queue.get()
             if msg[0] == 'update' and msg[1]:
                 self.update_ui()
             elif msg[0] == 'refresh' and msg[2]:
-                self.update_ui()
+                self._update_card(msg[1])
+            elif msg[0] == 'stats' and msg[2]:
+                self._update_card_stats(msg[1])
         self.root.after(100, self._process_queue)
+
+    def _update_card(self, f: str):
+        if not self.device.db:
+            return
+        module_name = self.device.yang_model_name.split('@')[0].replace(".sid", "")
+        db_xpath = f"{module_name}:measurements/measurement"
+        measurement_path = db_xpath + f
+        try:
+            data = self.device.db[measurement_path]
+            raw = data.get('value')
+            precision = data.get('precision', 0)
+            value = raw / 10**precision if raw is not None else '---'
+            unit = data.get('unit', '')
+            internal = data.get('internal', {})
+            last_update = int(internal.get('last-update', 0))
+            display_text = f"{value} {unit}"
+            if f in self.cards:
+                self.cards[f].update_data(display_text, last_update)
+        except KeyError:
+            pass
+
+    def _update_card_stats(self, f: str):
+        if not self.device.db:
+            return
+        module_name = self.device.yang_model_name.split('@')[0].replace(".sid", "")
+        db_xpath = f"{module_name}:measurements/measurement"
+        measurement_path = db_xpath + f
+        try:
+            data = self.device.db[measurement_path]
+            precision = data.get('precision', 0)
+            unit = data.get('unit', '')
+            stats = data.get('statistics', {})
+            if f in self.cards:
+                self.cards[f].update_stats(stats, precision, unit)
+        except KeyError:
+            pass
 
     def _check_timeouts(self):
         current_time = int(time.time())
@@ -300,6 +581,8 @@ class CockpitDashboardApp:
                 else:
                     card = MeasurementCard(self.grid_frame, f, m_type, display_text, last_update)
                     card.set_refresh_callback(lambda key=f: self._refresh_card(key))
+                    card.set_stats_callback(lambda key=f: self._stats_card(key))
+                    card.set_thresholds_callback(lambda key=f: self._thresholds_card(key))
                     card.grid(row=self._grid_row, column=self._grid_col,
                               padx=8, pady=8, sticky='nsew')
                     self.cards[f] = card
