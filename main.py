@@ -11,6 +11,16 @@ import tkinter as tk
 from tkinter import ttk
 from queue import Queue
 
+def _parse_float_or_none(s: str):
+    """Parse a string to float, returning None if blank or non-numeric."""
+    s = s.strip()
+    if not s:
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s: %(message)s')
 log = logging.getLogger("cockpit")
 
@@ -164,15 +174,30 @@ class RemoteDevice:
 
         return True
 
-    async def observe_threshold(self, f: str, t_min, t_max) -> bool:
+    async def observe_threshold(self, f: str, t_min, t_max, hysteresis: int = 5) -> bool:
         # TODO: implement CoAP iPATCH to set notification-parameters/t-min and t-max
-        log.info("observe_threshold: f=%s t_min=%s t_max=%s", f, t_min, t_max)
+        log.info("observe_threshold: f=%s t_min=%s t_max=%s hysteresis=%s%%", f, t_min, t_max, hysteresis)
+
+        if t_min is None and t_max is None:
+            log.info("observe_threshold: no thresholds set, do nothing")
+            return False
 
         module_name = self.yang_model_name.split('@')[0].replace(".sid", "")
         db_xpath = f"{module_name}:measurements/measurement"
         xpath = f"/{db_xpath}{f}/notification-parameters"
 
-        data = {db_xpath + "/notification-parameters": {"t-min": t_min, "t-max": t_max}}
+        precision = self.db[db_xpath + f].get('precision', 0)
+
+        notif_params = {}
+        if t_max:
+            notif_params ["t-max"] = int(t_max * (10 ** precision))
+        if t_min:
+            notif_params["t-min"] = int(t_min * (10 ** precision))
+        if hysteresis != 5:
+            notif_params["hysteresis"] = hysteresis
+        
+
+        data = {db_xpath + "/notification-parameters": notif_params}
 
         payload = self.model.toCORECONF(json.dumps(data))
 
@@ -187,22 +212,49 @@ class RemoteDevice:
             payload=payload
         )
         request.opt.content_format = 142
+
+        try:
+            response = await asyncio.wait_for(self.protocol.request(request).response, timeout=5.0)
+            log.info("observe_threshold: response %s", response.code)
+            return response.code.is_successful()
+        except Exception as e:
+            log.error("observe_threshold: request failed: %s", e)
+            return False
+
+    async def observe_sensor_alert(self) -> bool:
+        module_name = self.yang_model_name.split('@')[0].replace(".sid", "")
+        xpath = f"/{module_name}:sensor-alert"
+
+        if xpath not in self.model.sids:
+            log.error("observe_sensor_alert: xpath not found: %s", xpath)
+            return False
+
+        sid = self.model.sids[xpath]
+        port_str = f":{self.server_port}" if self.server_port else ""
+        uri = f"coap://{self.server_host}{port_str}/c"
+        payload = cbor.dumps(sid)
+
+        log.info("GET+Observe %s  (SID=%s)", uri, sid)
+
+        request = aiocoap.Message(code=aiocoap.GET, uri=uri, payload=payload)
+        request.opt.content_format = 142
         request.opt.accept = 142
         request.opt.observe = 0
 
-        # Annule l'observation précédente sur cette mesure si elle existe
-        if f in self._observations:
-            self._observations[f].cancel()
+        if 'sensor-alert' in self._observations:
+            self._observations['sensor-alert'].cancel()
 
         obs = self.protocol.request(request)
         try:
             first = await asyncio.wait_for(obs.response, timeout=5.0)
-            log.info("observe_threshold: first response %s", first.code)
+            log.info("observe_sensor_alert: first response %s", first.code)
         except Exception as e:
-            log.error("observe_threshold: first response failed: %s", e)
+            log.error("observe_sensor_alert: first response failed: %s", e)
             return False
 
-        self._observations[f] = asyncio.ensure_future(self._watch_observation(f, obs))
+        self._observations['sensor-alert'] = asyncio.ensure_future(
+            self._watch_observation('sensor-alert', obs)
+        )
         return True
 
     async def _watch_observation(self, f: str, obs):
@@ -219,7 +271,7 @@ class RemoteDevice:
 
 
 class ThresholdsDialog(tk.Toplevel):
-    def __init__(self, parent, key_filter: str, t_min, t_max, precision: int, unit: str, on_apply):
+    def __init__(self, parent, key_filter: str, t_min, t_max, hysteresis: int, unit: str, on_apply):
         super().__init__(parent)
         self.title(f"Thresholds — {key_filter}")
         self.configure(bg='#1e1e2e')
@@ -227,12 +279,10 @@ class ThresholdsDialog(tk.Toplevel):
         self.grab_set()
 
         self._on_apply = on_apply
-        self._precision = precision
-        factor = 10 ** precision
 
         tk.Label(self, text="Threshold configuration", font=('Arial', 11, 'bold'),
                  fg='white', bg='#1e1e2e').pack(pady=(12, 4))
-        tk.Label(self, text=f"Unit: {unit}  (precision: ×10⁻{precision})",
+        tk.Label(self, text=f"Unit: {unit}",
                  font=('Arial', 9), fg='#aaa', bg='#1e1e2e').pack(pady=(0, 10))
 
         for label, attr, raw_val in (('t-min', '_entry_min', t_min), ('t-max', '_entry_max', t_max)):
@@ -243,23 +293,33 @@ class ThresholdsDialog(tk.Toplevel):
             entry = tk.Entry(row, font=('Arial', 11), bg='#2a2a3e', fg='white',
                              insertbackground='white', width=12)
             if raw_val is not None:
-                entry.insert(0, str(raw_val / factor))
+                entry.insert(0, str(raw_val))
             entry.pack(side=tk.LEFT, padx=8)
             setattr(self, attr, entry)
+
+        row_hyst = tk.Frame(self, bg='#1e1e2e', padx=16, pady=4)
+        row_hyst.pack(fill=tk.X)
+        tk.Label(row_hyst, text="hysteresis (%):", font=('Arial', 11), fg='#aaccff',
+                 bg='#1e1e2e', width=14, anchor='w').pack(side=tk.LEFT)
+        self._entry_hysteresis = tk.Entry(row_hyst, font=('Arial', 11), bg='#2a2a3e', fg='white',
+                                          insertbackground='white', width=12)
+        self._entry_hysteresis.insert(0, str(hysteresis))
+        self._entry_hysteresis.pack(side=tk.LEFT, padx=8)
 
         self._err_label = tk.Label(self, text='', font=('Arial', 9), fg='#ff6666', bg='#1e1e2e')
         self._err_label.pack()
 
         btn_row = tk.Frame(self, bg='#1e1e2e', pady=12)
         btn_row.pack()
-        tk.Button(btn_row, text="Apply", bg='#3a86ff', fg='white',
-                  activebackground='#5a9fff', activeforeground='white',
+        tk.Button(btn_row, text="Apply", bg='#90ee90', fg='#003020',
+                  activebackground='#70cc70', activeforeground='#003020',
                   relief=tk.FLAT, padx=12, pady=4,
                   command=self._apply).pack(side=tk.LEFT, padx=6)
-        tk.Button(btn_row, text="Cancel", bg='#555', fg='white',
-                  activebackground='#666', activeforeground='white',
+        tk.Button(btn_row, text="Cancel", bg='#ffaaaa', fg='#400000',
+                  activebackground='#dd8888', activeforeground='#400000',
                   relief=tk.FLAT, padx=12, pady=4,
                   command=self.destroy).pack(side=tk.LEFT, padx=6)
+        self.bind('<Return>', lambda _e: self._apply())
 
         self.update_idletasks()
         x = parent.winfo_x() + (parent.winfo_width() - self.winfo_width()) // 2
@@ -267,19 +327,21 @@ class ThresholdsDialog(tk.Toplevel):
         self.geometry(f"+{x}+{y}")
 
     def _apply(self):
-        factor = 10 ** self._precision
         t_min_raw = t_max_raw = None
         try:
             s = self._entry_min.get().strip()
             if s:
-                t_min_raw = int(float(s) * factor)
+                t_min_raw = float(s)
             s = self._entry_max.get().strip()
             if s:
-                t_max_raw = int(float(s) * factor)
+                t_max_raw = float(s)
+            hysteresis = int(self._entry_hysteresis.get().strip() or '5')
+            if not (0 <= hysteresis <= 100):
+                raise ValueError
         except ValueError:
-            self._err_label.config(text="Invalid value — use numbers only.")
+            self._err_label.config(text="Invalid value — hysteresis must be 0–100.")
             return
-        self._on_apply(t_min_raw, t_max_raw)
+        self._on_apply(t_min_raw, t_max_raw, hysteresis)
         self.destroy()
 
 
@@ -310,10 +372,11 @@ class MeasurementCard(tk.Frame):
                   activebackground='#999', activeforeground='#003080',
                   relief=tk.FLAT, padx=6, pady=2,
                   command=self._on_stats).pack(side=tk.LEFT, padx=2)
-        tk.Button(btn_frame, text="Thresholds", bg='#888', fg='#003080',
-                  activebackground='#999', activeforeground='#003080',
-                  relief=tk.FLAT, padx=6, pady=2,
-                  command=self._on_thresholds).pack(side=tk.LEFT, padx=2)
+        self._threshold_btn = tk.Button(btn_frame, text="Thresholds", bg='#888', fg='#003080',
+                                        activebackground='#999', activeforeground='#003080',
+                                        relief=tk.FLAT, padx=6, pady=2,
+                                        command=self._on_thresholds)
+        self._threshold_btn.pack(side=tk.LEFT, padx=2)
         tk.Button(btn_frame, text="Follow", bg='#888', fg='#003080',
                   activebackground='#999', activeforeground='#003080',
                   relief=tk.FLAT, padx=6, pady=2).pack(side=tk.LEFT, padx=2)
@@ -343,6 +406,14 @@ class MeasurementCard(tk.Frame):
 
     def set_thresholds_callback(self, cb):
         self._thresholds_callback = cb
+
+    def set_thresholds_active(self, active: bool):
+        if active:
+            self._threshold_btn.config(bg='#003080', fg='white',
+                                       activebackground='#0050b0', activeforeground='white')
+        else:
+            self._threshold_btn.config(bg='#888', fg='#003080',
+                                       activebackground='#999', activeforeground='#003080')
 
     def _on_refresh(self):
         if self._refresh_callback:
@@ -441,20 +512,27 @@ class CockpitDashboardApp:
         db_xpath = f"{module_name}:measurements/measurement"
         try:
             data = self.device.db[db_xpath + f]
-            precision = data.get('precision', 0)
             unit = data.get('unit', '')
             notif = data.get('notification-parameters', {})
             t_min = notif.get('t-min')
             t_max = notif.get('t-max')
+            hysteresis = notif.get('hysteresis', 5)
         except KeyError:
-            precision, unit, t_min, t_max = 0, '', None, None
+            unit, t_min, t_max, hysteresis = '', None, None, 5
 
         ThresholdsDialog(
-            self.root, f, t_min, t_max, precision, unit,
-            on_apply=lambda mn, mx: asyncio.run_coroutine_threadsafe(
-                self.device.observe_threshold(f, mn, mx), self.loop
+            self.root, f, t_min, t_max, hysteresis, unit,
+            on_apply=lambda mn, mx, hyst: asyncio.run_coroutine_threadsafe(
+                self._async_set_and_observe(f, mn, mx, hyst), self.loop
             )
         )
+
+    async def _async_set_and_observe(self, f: str, t_min, t_max, hysteresis: int):
+        success = await self.device.observe_threshold(f, t_min, t_max, hysteresis)
+        if success:
+            observed = await self.device.observe_sensor_alert()
+            if observed:
+                self.queue.put(('threshold_active', f, True))
 
     def _process_queue(self):
         while not self.queue.empty():
@@ -465,6 +543,9 @@ class CockpitDashboardApp:
                 self._update_card(msg[1])
             elif msg[0] == 'stats' and msg[2]:
                 self._update_card_stats(msg[1])
+            elif msg[0] == 'threshold_active':
+                if msg[1] in self.cards:
+                    self.cards[msg[1]].set_thresholds_active(msg[2])
         self.root.after(100, self._process_queue)
 
     def _update_card(self, f: str):
@@ -605,7 +686,7 @@ def main():
     parser = argparse.ArgumentParser(description="Cockpit2 GUI Dashboard")
     parser.add_argument("--host", type=str, default="[::1]", help="CoAP Server Host (default: [::1])")
     parser.add_argument("--port", type=int, default=None, help="CoAP Server Port")
-    parser.add_argument("--model", type=str, default="coreconf-m2m@2026-03-08", help="YANG Model Name")
+    parser.add_argument("--model", type=str, default="coreconf-m2m@2026-03-16", help="YANG Model Name")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose network logging")
     args = parser.parse_args()
 

@@ -353,6 +353,19 @@ module coreconf-m2m {
             "Maximum threshold value. A sensor-alert is raised when the
              measurement exceeds this value.";
         }
+
+        leaf hysteresis {
+          type uint8 {
+            range "0..100";
+          }
+          default 5;
+          units "percent";
+          description
+            "Hysteresis applied to threshold crossings, expressed as a
+             percentage of the threshold value. An alert is cleared only
+             when the measurement returns past the threshold by at least
+             this percentage, preventing rapid re-triggering.";
+        }
       }
 
       container statistics {
