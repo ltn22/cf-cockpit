@@ -133,6 +133,60 @@ class RemoteDevice:
         return True
 
 
+class StatsDialog(tk.Toplevel):
+    def __init__(self, parent_window, on_confirm):
+        super().__init__(parent_window)
+        self._on_confirm = on_confirm
+        self._parent = parent_window
+
+        self.title("Sensor Alert Settings")
+        self.transient(parent_window)
+        self.resizable(False, False)
+        self.protocol("WM_DELETE_WINDOW", self._on_cancel)
+        self.configure(bg='#1e1e2e')
+
+        tk.Label(self, text="Min", fg='white', bg='#1e1e2e').grid(
+            row=0, column=0, padx=12, pady=(12, 4), sticky='w')
+        self._min_entry = tk.Entry(self, width=12)
+        self._min_entry.grid(row=0, column=1, padx=12, pady=(12, 4))
+
+        tk.Label(self, text="Max", fg='white', bg='#1e1e2e').grid(
+            row=1, column=0, padx=12, pady=4, sticky='w')
+        self._max_entry = tk.Entry(self, width=12)
+        self._max_entry.grid(row=1, column=1, padx=12, pady=4)
+
+        tk.Label(self, text="Hysteresis (%)", fg='white', bg='#1e1e2e').grid(
+            row=2, column=0, padx=12, pady=4, sticky='w')
+        self._hyst_entry = tk.Entry(self, width=12)
+        self._hyst_entry.insert(0, "5")
+        self._hyst_entry.grid(row=2, column=1, padx=12, pady=4)
+
+        btn_frame = tk.Frame(self, bg='#1e1e2e')
+        btn_frame.grid(row=3, column=0, columnspan=2, pady=(8, 12))
+        tk.Button(btn_frame, text="OK", bg='#3a86ff', fg='white',
+                  relief=tk.FLAT, padx=10, pady=3,
+                  command=self._on_ok).pack(side=tk.LEFT, padx=6)
+        tk.Button(btn_frame, text="Cancel", bg='#888', fg='white',
+                  relief=tk.FLAT, padx=10, pady=3,
+                  command=self._on_cancel).pack(side=tk.LEFT, padx=6)
+
+        self.grab_set()
+        self.focus_set()
+
+    def _on_ok(self):
+        min_val = _parse_float_or_none(self._min_entry.get())
+        max_val = _parse_float_or_none(self._max_entry.get())
+        raw_hyst = _parse_float_or_none(self._hyst_entry.get())
+        hysteresis = raw_hyst if raw_hyst is not None else 5.0
+        self._on_confirm(min_val, max_val, hysteresis)
+        self._parent.focus_set()
+        self.destroy()
+
+    def _on_cancel(self):
+        self._parent.focus_set()
+        self.destroy()
+
+
 class MeasurementCard(tk.Frame):
     def __init__(self, parent, key_filter: str, m_type: str, initial_value: str, last_up: int):
         super().__init__(parent, relief=tk.RIDGE, borderwidth=2, padx=8, pady=8, bg="#1e1e2e")
