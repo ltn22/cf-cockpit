@@ -404,203 +404,210 @@
       },
       {
         "namespace": "data",
-        "identifier": "/coreconf-m2m:measurements/measurement/notification-parameters/precision",
+        "identifier": "/coreconf-m2m:measurements/measurement/notification-parameters/hysteresis",
         "status": "unstable",
         "sid": "100059",
         "type": "uint8"
       },
       {
         "namespace": "data",
-        "identifier": "/coreconf-m2m:measurements/measurement/notification-parameters/step",
+        "identifier": "/coreconf-m2m:measurements/measurement/notification-parameters/precision",
         "status": "unstable",
         "sid": "100060",
+        "type": "uint8"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/coreconf-m2m:measurements/measurement/notification-parameters/step",
+        "status": "unstable",
+        "sid": "100061",
         "type": "uint32"
       },
       {
         "namespace": "data",
         "identifier": "/coreconf-m2m:measurements/measurement/notification-parameters/t-max",
         "status": "unstable",
-        "sid": "100061",
+        "sid": "100062",
         "type": "int32"
       },
       {
         "namespace": "data",
         "identifier": "/coreconf-m2m:measurements/measurement/notification-parameters/t-min",
         "status": "unstable",
-        "sid": "100062",
+        "sid": "100063",
         "type": "int32"
       },
       {
         "namespace": "data",
         "identifier": "/coreconf-m2m:measurements/measurement/precision",
         "status": "unstable",
-        "sid": "100063",
+        "sid": "100064",
         "type": "uint8"
       },
       {
         "namespace": "data",
         "identifier": "/coreconf-m2m:measurements/measurement/reset-stats",
         "status": "unstable",
-        "sid": "100064"
+        "sid": "100065"
       },
       {
         "namespace": "data",
         "identifier": "/coreconf-m2m:measurements/measurement/reset-stats/input",
         "status": "unstable",
-        "sid": "100065"
+        "sid": "100066"
       },
       {
         "namespace": "data",
         "identifier": "/coreconf-m2m:measurements/measurement/reset-stats/output",
         "status": "unstable",
-        "sid": "100066"
+        "sid": "100067"
       },
       {
         "namespace": "data",
         "identifier": "/coreconf-m2m:measurements/measurement/statistics",
         "status": "unstable",
-        "sid": "100067"
+        "sid": "100068"
       },
       {
         "namespace": "data",
         "identifier": "/coreconf-m2m:measurements/measurement/statistics/max",
-        "status": "unstable",
-        "sid": "100068",
-        "type": "int64"
-      },
-      {
-        "namespace": "data",
-        "identifier": "/coreconf-m2m:measurements/measurement/statistics/mean",
         "status": "unstable",
         "sid": "100069",
         "type": "int64"
       },
       {
         "namespace": "data",
-        "identifier": "/coreconf-m2m:measurements/measurement/statistics/median",
+        "identifier": "/coreconf-m2m:measurements/measurement/statistics/mean",
         "status": "unstable",
         "sid": "100070",
         "type": "int64"
       },
       {
         "namespace": "data",
-        "identifier": "/coreconf-m2m:measurements/measurement/statistics/min",
+        "identifier": "/coreconf-m2m:measurements/measurement/statistics/median",
         "status": "unstable",
         "sid": "100071",
         "type": "int64"
       },
       {
         "namespace": "data",
-        "identifier": "/coreconf-m2m:measurements/measurement/statistics/sample-count",
+        "identifier": "/coreconf-m2m:measurements/measurement/statistics/min",
         "status": "unstable",
         "sid": "100072",
-        "type": "uint64"
+        "type": "int64"
       },
       {
         "namespace": "data",
-        "identifier": "/coreconf-m2m:measurements/measurement/statistics/stdev",
+        "identifier": "/coreconf-m2m:measurements/measurement/statistics/sample-count",
         "status": "unstable",
         "sid": "100073",
         "type": "uint64"
       },
       {
         "namespace": "data",
-        "identifier": "/coreconf-m2m:measurements/measurement/type",
+        "identifier": "/coreconf-m2m:measurements/measurement/statistics/stdev",
         "status": "unstable",
         "sid": "100074",
+        "type": "uint64"
+      },
+      {
+        "namespace": "data",
+        "identifier": "/coreconf-m2m:measurements/measurement/type",
+        "status": "unstable",
+        "sid": "100075",
         "type": "identityref"
       },
       {
         "namespace": "data",
         "identifier": "/coreconf-m2m:measurements/measurement/unit",
         "status": "unstable",
-        "sid": "100075",
+        "sid": "100076",
         "type": "string"
       },
       {
         "namespace": "data",
         "identifier": "/coreconf-m2m:measurements/measurement/value",
         "status": "unstable",
-        "sid": "100076",
+        "sid": "100077",
         "type": "int64"
       },
       {
         "namespace": "data",
         "identifier": "/coreconf-m2m:reset-stats",
         "status": "unstable",
-        "sid": "100077"
+        "sid": "100078"
       },
       {
         "namespace": "data",
         "identifier": "/coreconf-m2m:reset-stats/input",
         "status": "unstable",
-        "sid": "100078"
+        "sid": "100079"
       },
       {
         "namespace": "data",
         "identifier": "/coreconf-m2m:reset-stats/output",
         "status": "unstable",
-        "sid": "100079"
+        "sid": "100080"
       },
       {
         "namespace": "data",
         "identifier": "/coreconf-m2m:sensor-alert",
         "status": "unstable",
-        "sid": "100080"
+        "sid": "100081"
       },
       {
         "namespace": "data",
         "identifier": "/coreconf-m2m:sensor-alert/target",
         "status": "unstable",
-        "sid": "100081"
+        "sid": "100082"
       },
       {
         "namespace": "data",
         "identifier": "/coreconf-m2m:sensor-alert/target/id",
         "status": "unstable",
-        "sid": "100082",
+        "sid": "100083",
         "type": "uint8"
       },
       {
         "namespace": "data",
         "identifier": "/coreconf-m2m:sensor-alert/target/type",
         "status": "unstable",
-        "sid": "100083",
+        "sid": "100084",
         "type": "identityref"
       },
       {
         "namespace": "data",
         "identifier": "/coreconf-m2m:sensor-alert/target/value",
         "status": "unstable",
-        "sid": "100084",
+        "sid": "100085",
         "type": "int64"
       },
       {
         "namespace": "data",
         "identifier": "/coreconf-m2m:state",
         "status": "unstable",
-        "sid": "100085"
+        "sid": "100086"
       },
       {
         "namespace": "data",
         "identifier": "/coreconf-m2m:state/uptime",
         "status": "unstable",
-        "sid": "100086",
+        "sid": "100087",
         "type": "uint64"
       }
     ],
     "key-mapping": {
       "100053": [
-        100074,
+        100075,
         100054
       ],
       "100044": [
         100050,
         100045
       ],
-      "100081": [
-        100083,
-        100082
+      "100082": [
+        100084,
+        100083
       ]
     }
   }
