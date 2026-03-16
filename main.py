@@ -208,19 +208,28 @@ class MeasurementCard(tk.Frame):
                   command=self._on_refresh).pack(side=tk.LEFT, padx=2)
         tk.Button(btn_frame, text="Stats", bg='#888', fg='#003080',
                   activebackground='#999', activeforeground='#003080',
-                  relief=tk.FLAT, padx=6, pady=2).pack(side=tk.LEFT, padx=2)
+                  relief=tk.FLAT, padx=6, pady=2,
+                  command=self._on_stats).pack(side=tk.LEFT, padx=2)
         tk.Button(btn_frame, text="Follow", bg='#888', fg='#003080',
                   activebackground='#999', activeforeground='#003080',
                   relief=tk.FLAT, padx=6, pady=2).pack(side=tk.LEFT, padx=2)
 
         self._refresh_callback = None
+        self._stats_callback = None
 
     def set_refresh_callback(self, cb):
         self._refresh_callback = cb
 
+    def set_stats_callback(self, cb):
+        self._stats_callback = cb
+
     def _on_refresh(self):
         if self._refresh_callback:
             self._refresh_callback()
+
+    def _on_stats(self):
+        if self._stats_callback:
+            StatsDialog(self.winfo_toplevel(), self._stats_callback)
 
     def update_data(self, display_text: str, last_up: int):
         self.val_label.config(text=display_text)
