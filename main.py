@@ -282,6 +282,12 @@ class CockpitDashboardApp:
     def _refresh_card(self, f: str):
         asyncio.run_coroutine_threadsafe(self._async_fetch_measurement(f), self.loop)
 
+    def _fetch_sensor_alert(self, key: str, min_val, max_val, hysteresis: float):
+        log.info(
+            "fetch_sensor_alert key=%s min=%s max=%s hysteresis=%.1f%%",
+            key, min_val, max_val, hysteresis
+        )
+
     async def _async_fetch_measurement(self, f: str):
         success = await self.device.fetch_measurement(f)
         self.queue.put(('refresh', f, success))
@@ -373,6 +379,9 @@ class CockpitDashboardApp:
                 else:
                     card = MeasurementCard(self.grid_frame, f, m_type, display_text, last_update)
                     card.set_refresh_callback(lambda key=f: self._refresh_card(key))
+                    card.set_stats_callback(
+                        lambda mn, mx, hy, key=f: self._fetch_sensor_alert(key, mn, mx, hy)
+                    )
                     card.grid(row=self._grid_row, column=self._grid_col,
                               padx=8, pady=8, sticky='nsew')
                     self.cards[f] = card
