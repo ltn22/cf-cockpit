@@ -11,6 +11,16 @@ import tkinter as tk
 from tkinter import ttk
 from queue import Queue
 
+def _parse_float_or_none(s: str):
+    """Parse a string to float, returning None if blank or non-numeric."""
+    s = s.strip()
+    if not s:
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s: %(message)s')
 log = logging.getLogger("cockpit")
 
