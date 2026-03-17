@@ -231,7 +231,7 @@ class RemoteDevice:
 
         sid = self.model.sids[xpath]
         port_str = f":{self.server_port}" if self.server_port else ""
-        uri = f"coap://{self.server_host}{port_str}/c"
+        uri = f"coap://{self.server_host}{port_str}/s"
         payload = cbor.dumps(sid)
 
         log.info("GET+Observe %s  (SID=%s)", uri, sid)
