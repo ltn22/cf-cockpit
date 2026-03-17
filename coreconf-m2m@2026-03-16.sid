@@ -1,7 +1,7 @@
 {
   "ietf-sid-file:sid-file": {
     "module-name": "coreconf-m2m",
-    "module-revision": "2026-03-08",
+    "module-revision": "2026-03-16",
     "sid-file-status": "unpublished",
     "dependency-revision": [
       {

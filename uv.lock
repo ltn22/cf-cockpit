@@ -1,6 +1,6 @@
 version = 1
 revision = 3
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 
 [[package]]
 name = "aiocoap"
@@ -17,6 +17,13 @@ version = "5.8.0"
 source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/d9/8e/8b4fdde28e42ffcd741a37f4ffa9fb59cd4fe01625b544dfcfd9ccb54f01/cbor2-5.8.0.tar.gz", hash = "sha256:b19c35fcae9688ac01ef75bad5db27300c2537eb4ee00ed07e05d8456a0d4931", size = 107825, upload-time = "2025-12-30T18:44:22.455Z" }
 wheels = [
+    { url = "https://files.pythonhosted.org/packages/3c/05/486166d9e998d65d70810e63eeacc8c5f13d167d8797cf2d73a588beb335/cbor2-5.8.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:2263c0c892194f10012ced24c322d025d9d7b11b41da1c357f3b3fe06676e6b7", size = 69882, upload-time = "2025-12-30T18:43:25.365Z" },
+    { url = "https://files.pythonhosted.org/packages/4e/d0/ee976eaaf21c211eef651e1a921c109c3c3a3785d98307d74a70d142f341/cbor2-5.8.0-cp310-cp310-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:6ffe4ca079f6f8ed393f5c71a8de22651cb27bd50e74e2bcd6bc9c8f853a732b", size = 260696, upload-time = "2025-12-30T18:43:27.784Z" },
+    { url = "https://files.pythonhosted.org/packages/66/7f/81cabd3aee6cc54b101a5214d5c3e541d275d7c05647c7dfc266c6aacf6f/cbor2-5.8.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:0427bd166230fe4c4b72965c6f2b6273bf29016d97cf08b258fa48db851ea598", size = 252135, upload-time = "2025-12-30T18:43:29.418Z" },
+    { url = "https://files.pythonhosted.org/packages/c2/0b/f38e8c579e7e2d88d446549bce35bde7d845199300bc456b4123d6e6f0af/cbor2-5.8.0-cp310-cp310-musllinux_1_2_aarch64.whl", hash = "sha256:c23a04947c37964d70028ca44ea2a8709f09b8adc0090f9b5710fa957e9bc545", size = 255342, upload-time = "2025-12-30T18:43:30.966Z" },
+    { url = "https://files.pythonhosted.org/packages/5d/02/8413f1bd42c8f665fb85374151599cb4957848f0f307d08334a08dee544c/cbor2-5.8.0-cp310-cp310-musllinux_1_2_x86_64.whl", hash = "sha256:218d5c7d2e8d13c7eded01a1b3fe2a9a1e51a7a843cefb8d38cb4bbbc6ad9bf7", size = 247191, upload-time = "2025-12-30T18:43:32.555Z" },
+    { url = "https://files.pythonhosted.org/packages/e5/b8/edeffcad06b83d3661827973a8e6f5d51a9f5842e1ee9d191fdef60388ad/cbor2-5.8.0-cp310-cp310-win_amd64.whl", hash = "sha256:4ce7d907a25448af7c13415281d739634edfd417228b274309b243ca52ad71f9", size = 69254, upload-time = "2025-12-30T18:43:33.717Z" },
+    { url = "https://files.pythonhosted.org/packages/ce/1a/dde6537d8d1c2b3157ea6487ea417a5ad0157687d0e9a3ff806bf23c8cb1/cbor2-5.8.0-cp310-cp310-win_arm64.whl", hash = "sha256:628d0ea850aa040921a0e50a08180e7d20cf691432cec3eabc193f643eccfbde", size = 64946, upload-time = "2025-12-30T18:43:34.849Z" },
     { url = "https://files.pythonhosted.org/packages/88/4b/623435ef9b98e86b6956a41863d39ff4fe4d67983948b5834f55499681dd/cbor2-5.8.0-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:18ac191640093e6c7fbcb174c006ffec4106c3d8ab788e70272c1c4d933cbe11", size = 69875, upload-time = "2025-12-30T18:43:35.888Z" },
     { url = "https://files.pythonhosted.org/packages/58/17/f664201080b2a7d0f57c16c8e9e5922013b92f202e294863ec7e75b7ff7f/cbor2-5.8.0-cp311-cp311-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:fddee9103a17d7bed5753f0c7fc6663faa506eb953e50d8287804eccf7b048e6", size = 268316, upload-time = "2025-12-30T18:43:37.161Z" },
     { url = "https://files.pythonhosted.org/packages/d0/e1/072745b4ff01afe9df2cd627f8fc51a1acedb5d3d1253765625d2929db91/cbor2-5.8.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:8d2ea26fad620aba5e88d7541be8b10c5034a55db9a23809b7cb49f36803f05b", size = 258874, upload-time = "2025-12-30T18:43:38.878Z" },
@@ -68,7 +75,7 @@ requires-dist = [
 [[package]]
 name = "pycoreconf"
 version = "0.1.0"
-source = { git = "https://github.com/ltn22/pycoreconf.git?rev=findSID#1dd8022a67d433f11ff5c12680f1616b2f37a2e9" }
+source = { git = "https://github.com/ltn22/pycoreconf.git?rev=findSID#32aaa36cf50001f2d0049dfab8cced02a3867cc3" }
 dependencies = [
     { name = "cbor2" },
 ]

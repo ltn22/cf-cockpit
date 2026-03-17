@@ -17,6 +17,12 @@ module coreconf-m2m {
     "YANG data model for a generic M2M CoMI weather station.
      This model defines the operational state data for sensor readings.";
 
+  revision 2026-03-16 {
+    description
+      "Add notification-parameters/hysteresis leaf.
+       Align field ordering in measurements/measurement with cf-cockpit.";
+  }
+
   revision 2026-03-08 {
     description
       "Module renamed to coreconf-m2m for generic M2M CoMI use.";

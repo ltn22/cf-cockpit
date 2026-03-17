@@ -221,22 +221,28 @@ class RemoteDevice:
             log.error("observe_threshold: request failed: %s", e)
             return False
 
-    async def observe_sensor_alert(self) -> bool:
+    async def observe_sensor_alert(self, f: str) -> bool:
         module_name = self.yang_model_name.split('@')[0].replace(".sid", "")
-        xpath = f"/{module_name}:sensor-alert"
+        xpath = f"/{module_name}:sensor-alert/target{f}"
 
-        if xpath not in self.model.sids:
-            log.error("observe_sensor_alert: xpath not found: %s", xpath)
+        if not self.db:
+            log.error("observe_sensor_alert: db not initialized")
             return False
 
-        sid = self.model.sids[xpath]
+        try:
+            target_sid, key_values = self.db._resolve_path(xpath)
+        except (KeyError, ValueError) as e:
+            log.error("observe_sensor_alert: cannot resolve xpath %s: %s", xpath, e)
+            return False
+
+        instance_id = [target_sid] + key_values
         port_str = f":{self.server_port}" if self.server_port else ""
         uri = f"coap://{self.server_host}{port_str}/s"
-        payload = cbor.dumps(sid)
+        payload = cbor.dumps(instance_id)
 
-        log.info("GET+Observe %s  (SID=%s)", uri, sid)
+        log.info("FETCH+Observe %s  (instance=%s)", uri, instance_id)
 
-        request = aiocoap.Message(code=aiocoap.GET, uri=uri, payload=payload)
+        request = aiocoap.Message(code=aiocoap.FETCH, uri=uri, payload=payload)
         request.opt.content_format = 142
         request.opt.accept = 142
         request.opt.observe = 0
@@ -486,8 +492,13 @@ class CockpitDashboardApp:
         asyncio.run_coroutine_threadsafe(self._async_init(), self.loop)
 
     async def _async_init(self):
-        await self.device.init_model()
-        success = await self.device.bootstrap_db()
+        try:
+            await self.device.init_model()
+            success = await self.device.bootstrap_db()
+        except Exception as e:
+            log.error("Init failed: %s", e)
+            self.queue.put(('update', False))
+            return
         log.info("Bootstrap %s", "succeeded" if success else "failed")
         self.queue.put(('update', success))
 
@@ -530,7 +541,7 @@ class CockpitDashboardApp:
     async def _async_set_and_observe(self, f: str, t_min, t_max, hysteresis: int):
         success = await self.device.observe_threshold(f, t_min, t_max, hysteresis)
         if success:
-            observed = await self.device.observe_sensor_alert()
+            observed = await self.device.observe_sensor_alert(f)
             if observed:
                 self.queue.put(('threshold_active', f, True))
 
