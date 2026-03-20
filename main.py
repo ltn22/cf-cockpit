@@ -640,7 +640,8 @@ class CockpitDashboardApp:
         self._grid_col = 0
 
     def _manual_refresh(self):
-        self.update_ui()
+        for f in list(self.cards.keys()):
+            self._refresh_card(f)
 
     def update_ui(self):
         if not self.device.db:
