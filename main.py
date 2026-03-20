@@ -174,6 +174,35 @@ class RemoteDevice:
 
         return True
 
+    async def refresh_all_measurements(self) -> bool:
+        module_name = self.yang_model_name.split('@')[0].replace(".sid", "")
+        db_xpath = f"{module_name}:measurements/measurement"
+        xpath = f"/{db_xpath}"
+
+        measurements_sid = self.model.sids[xpath]
+        port_str = f":{self.server_port}" if self.server_port else ""
+        uri = f"coap://{self.server_host}{port_str}/c?d=0"
+
+        log.info("FETCH ALL %s  (SID=%s)", uri, measurements_sid)
+        payload = cbor.dumps(measurements_sid)
+        request = aiocoap.Message(code=aiocoap.FETCH, uri=uri, payload=payload)
+        request.opt.content_format = 142
+        request.opt.accept = 142
+
+        try:
+            response = await asyncio.wait_for(self.protocol.request(request).response, timeout=5.0)
+            log.info("Response code: %s  payload: %d bytes", response.code, len(response.payload))
+            new_db = self.model.loadDB(response.payload)
+            filters = self.db.get_keys(db_xpath)
+            for f in filters:
+                data = new_db[db_xpath + f]
+                self.db[db_xpath + f + "/value"] = data
+                self.db[db_xpath + f] = {'internal': {'last-update': int(time.time())}}
+            return True
+        except Exception as e:
+            log.error("refresh_all_measurements failed: %s", e)
+            return False
+
     async def observe_threshold(self, f: str, t_min, t_max, hysteresis: int = 5) -> bool:
         # TODO: implement CoAP iPATCH to set notification-parameters/t-min and t-max
         log.info("observe_threshold: f=%s t_min=%s t_max=%s hysteresis=%s%%", f, t_min, t_max, hysteresis)
@@ -640,8 +669,13 @@ class CockpitDashboardApp:
         self._grid_col = 0
 
     def _manual_refresh(self):
-        for f in list(self.cards.keys()):
-            self._refresh_card(f)
+        asyncio.run_coroutine_threadsafe(self._async_refresh_all(), self.loop)
+
+    async def _async_refresh_all(self):
+        success = await self.device.refresh_all_measurements()
+        if success:
+            for f in list(self.cards.keys()):
+                self.queue.put(('refresh', f, True))
 
     def update_ui(self):
         if not self.device.db:
