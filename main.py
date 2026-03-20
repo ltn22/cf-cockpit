@@ -196,12 +196,16 @@ class RemoteDevice:
         if hysteresis != 5:
             notif_params["hysteresis"] = hysteresis
         
+        qualified_payload = {db_xpath+'/notification-parameters': notif_params}
+        payload = self.model.toCORECONF(json.dumps(qualified_payload))
 
-        data = {db_xpath + "/notification-parameters": notif_params}
+        xpath_key= self.db._resolve_path(xpath)
+        ipatch_key = [xpath_key[0]] + xpath_key[1]
 
-        payload = self.model.toCORECONF(json.dumps(data))
+        ipatch_payload_struct = cbor.loads(payload)
+        ipatch_query = cbor.dumps({tuple(ipatch_key): ipatch_payload_struct})
 
-        log.info("iPATCH %s  payload (%d bytes): %s", xpath, len(payload), payload.hex())
+        log.info("iPATCH %s  payload (%d bytes): %s", xpath, len(ipatch_query), ipatch_query.hex())
 
         port_str = f":{self.server_port}" if self.server_port else ""
         uri = f"coap://{self.server_host}{port_str}/c"
@@ -209,7 +213,7 @@ class RemoteDevice:
         request = aiocoap.Message(
             code=aiocoap.numbers.codes.Code(7),  # iPATCH
             uri=uri,
-            payload=payload
+            payload=ipatch_query
         )
         request.opt.content_format = 142
 
