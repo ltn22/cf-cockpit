@@ -33,7 +33,8 @@ class RemoteDevice:
         self.model = None
         self.db = None
         self.protocol = None
-        self._observations = {}  # f -> asyncio.Task
+        self._observations = {}  # obs_key -> asyncio.Task or obs object
+        self._token_to_f = {}   # token_hex -> f
 
     async def init_model(self):
         sid_file = self.yang_model_name if self.yang_model_name.endswith('.sid') else f"{self.yang_model_name}.sid"
@@ -124,8 +125,7 @@ class RemoteDevice:
             log.debug("Response payload (CBOR hex): %s (%d bytes)", response.payload.hex(), len(response.payload))
             new_db = self.model.loadDB(response.payload)
             log.debug("Measurement JSON:\n%s", json.dumps(json.loads(new_db.to_json()), indent=2))
-            data = new_db[db_xpath + f]
-            self.db[db_xpath + f + "/value"] = data
+            self.db[db_xpath + f + "/value"] = new_db[db_xpath + f + "/value"]
             self.db[db_xpath + f] = {'internal': {'last-update': int(time.time())}}
         except Exception as e:
             log.error("fetch_measurement failed: %s", e)
@@ -181,7 +181,7 @@ class RemoteDevice:
 
         measurements_sid = self.model.sids[xpath]
         port_str = f":{self.server_port}" if self.server_port else ""
-        uri = f"coap://{self.server_host}{port_str}/c?d=0"
+        uri = f"coap://{self.server_host}{port_str}/c"
 
         log.info("FETCH ALL %s  (SID=%s)", uri, measurements_sid)
         payload = cbor.dumps(measurements_sid)
@@ -195,8 +195,7 @@ class RemoteDevice:
             new_db = self.model.loadDB(response.payload)
             filters = self.db.get_keys(db_xpath)
             for f in filters:
-                data = new_db[db_xpath + f]
-                self.db[db_xpath + f + "/value"] = data
+                self.db[db_xpath + f + "/value"] = new_db[db_xpath + f + "/value"]
                 self.db[db_xpath + f] = {'internal': {'last-update': int(time.time())}}
             return True
         except Exception as e:
@@ -280,33 +279,47 @@ class RemoteDevice:
         request.opt.accept = 142
         request.opt.observe = 0
 
-        if 'sensor-alert' in self._observations:
-            self._observations['sensor-alert'].cancel()
+        obs_key = f"sensor-alert{f}"
+        if obs_key in self._observations:
+            self._observations[obs_key].cancel()
 
         obs = self.protocol.request(request)
         try:
             first = await asyncio.wait_for(obs.response, timeout=5.0)
-            log.info("observe_sensor_alert: first response %s", first.code)
+            token_hex = first.token.hex()
+            self._token_to_f[token_hex] = f
+            log.info("observe_sensor_alert: first response %s  token=%s -> f=%s",
+                     first.code, token_hex, f)
         except Exception as e:
             log.error("observe_sensor_alert: first response failed: %s", e)
             return False
 
-        self._observations['sensor-alert'] = asyncio.ensure_future(
-            self._watch_observation('sensor-alert', obs)
+        self._observations[f"{obs_key}-obs"] = obs  # keep alive to prevent GC
+        self._observations[obs_key] = asyncio.ensure_future(
+            self._watch_observation(obs_key, obs)
         )
         return True
 
-    async def _watch_observation(self, f: str, obs):
-        log.info("_watch_observation[%s]: started", f)
+    async def _watch_observation(self, obs_key: str, obs):
+        log.info("_watch_observation[%s]: started", obs_key)
         try:
             async for response in obs.observation:
-                log.info("_watch_observation[%s]: notification %s  payload (%d bytes): %s",
-                         f, response.code, len(response.payload), response.payload.hex())
+                token_hex = response.token.hex()
+                f = self._token_to_f.get(token_hex, obs_key)
+                try:
+                    new_db = self.model.loadDB(response.payload)
+                    decoded = json.loads(new_db.to_json())
+                    log.info("_watch_observation token=%s f=%s: %s  values: %s",
+                             token_hex, f, response.code, json.dumps(decoded))
+                except Exception as e:
+                    log.error("_watch_observation token=%s f=%s: decode error: %s  hex: %s",
+                              token_hex, f, e, response.payload.hex())
+            log.warning("_watch_observation[%s]: observation stream ended", obs_key)
         except asyncio.CancelledError:
             obs.observation.cancel()
-            log.info("_watch_observation[%s]: cancelled", f)
+            log.info("_watch_observation[%s]: cancelled", obs_key)
         except Exception as e:
-            log.error("_watch_observation[%s]: error: %s", f, e)
+            log.error("_watch_observation[%s]: error: %s", obs_key, e)
 
 
 class ThresholdsDialog(tk.Toplevel):
@@ -579,18 +592,23 @@ class CockpitDashboardApp:
                 self.queue.put(('threshold_active', f, True))
 
     def _process_queue(self):
-        while not self.queue.empty():
-            msg = self.queue.get()
-            if msg[0] == 'update' and msg[1]:
-                self.update_ui()
-            elif msg[0] == 'refresh' and msg[2]:
-                self._update_card(msg[1])
-            elif msg[0] == 'stats' and msg[2]:
-                self._update_card_stats(msg[1])
-            elif msg[0] == 'threshold_active':
-                if msg[1] in self.cards:
-                    self.cards[msg[1]].set_thresholds_active(msg[2])
-        self.root.after(100, self._process_queue)
+        try:
+            while not self.queue.empty():
+                msg = self.queue.get()
+                try:
+                    if msg[0] == 'update' and msg[1]:
+                        self.update_ui()
+                    elif msg[0] == 'refresh' and msg[2]:
+                        self._update_card(msg[1])
+                    elif msg[0] == 'stats' and msg[2]:
+                        self._update_card_stats(msg[1])
+                    elif msg[0] == 'threshold_active':
+                        if msg[1] in self.cards:
+                            self.cards[msg[1]].set_thresholds_active(msg[2])
+                except Exception as e:
+                    log.error("_process_queue: error handling %s: %s", msg[0], e)
+        finally:
+            self.root.after(100, self._process_queue)
 
     def _update_card(self, f: str):
         if not self.device.db:
