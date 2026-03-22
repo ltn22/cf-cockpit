@@ -664,10 +664,10 @@ class CockpitDashboardApp:
         self.status_label = tk.Label(header, text="Connecting...", font=('Arial', 10),
                                       fg='#aaa', bg='#2a2a3e')
         self.status_label.pack(side=tk.RIGHT, padx=12)
-        tk.Button(header, text="Refresh All", bg='#3a86ff', fg='white',
-                  activebackground='#5a9fff', activeforeground='white',
+        tk.Button(header, text="Reset", bg='#cc2222', fg='white',
+                  activebackground='#ee4444', activeforeground='white',
                   relief=tk.FLAT, padx=8, pady=2,
-                  command=self._manual_refresh).pack(side=tk.RIGHT, padx=6)
+                  command=self._manual_reset).pack(side=tk.RIGHT, padx=6)
 
         # Scrollable canvas
         container = tk.Frame(self.root, bg='#13131f')
@@ -689,14 +689,13 @@ class CockpitDashboardApp:
         self._grid_row = 0
         self._grid_col = 0
 
-    def _manual_refresh(self):
-        asyncio.run_coroutine_threadsafe(self._async_refresh_all(), self.loop)
+    def _manual_reset(self):
+        asyncio.run_coroutine_threadsafe(self._async_reset(), self.loop)
 
-    async def _async_refresh_all(self):
-        success = await self.device.refresh_all_measurements()
+    async def _async_reset(self):
+        success = await self.device.bootstrap_db()
         if success:
-            for f in list(self.cards.keys()):
-                self.queue.put(('refresh', f, True))
+            self.queue.put(('update', True))
 
     def update_ui(self):
         if not self.device.db:
