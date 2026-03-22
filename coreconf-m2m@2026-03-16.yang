@@ -20,7 +20,7 @@ module coreconf-m2m {
   revision 2026-03-16 {
     description
       "Add notification-parameters/hysteresis leaf.
-       Align field ordering in measurements/measurement with cf-cockpit.";
+       Align field ordering in transducers/transducer with cf-cockpit.";
   }
 
   revision 2026-03-08 {
@@ -49,7 +49,7 @@ module coreconf-m2m {
   /* Measurement-type identity hierarchy                                  */
   /* ------------------------------------------------------------------ */
 
-  identity measurement-type {
+  identity transducer-type {
     description
       "Base identity for all measurement types.";
   }
@@ -57,92 +57,92 @@ module coreconf-m2m {
   /* --- Environmental --- */
 
   identity solar-radiation {
-    base measurement-type;
+    base transducer-type;
     description "Solar radiation measurement (W/m2).";
   }
 
   identity precipitation {
-    base measurement-type;
+    base transducer-type;
     description "Precipitation measurement (mm).";
   }
 
   identity air-temperature {
-    base measurement-type;
+    base transducer-type;
     description "Air temperature measurement (°C).";
   }
 
   identity relative-humidity {
-    base measurement-type;
+    base transducer-type;
     description "Relative humidity measurement (%).";
   }
 
   identity barometric-pressure {
-    base measurement-type;
+    base transducer-type;
     description "Barometric pressure measurement (kPa).";
   }
 
   identity vapor-pressure {
-    base measurement-type;
+    base transducer-type;
     description "Vapor pressure measurement (kPa).";
   }
 
   /* --- Wind --- */
 
   identity wind-speed {
-    base measurement-type;
+    base transducer-type;
     description "Horizontal wind speed measurement (m/s).";
   }
 
   identity wind-direction {
-    base measurement-type;
+    base transducer-type;
     description "Wind direction measurement (degrees).";
   }
 
   identity wind-gust {
-    base measurement-type;
+    base transducer-type;
     description "Wind gust measurement (m/s).";
   }
 
   /* --- Lightning --- */
 
   identity strike-count {
-    base measurement-type;
+    base transducer-type;
     description "Lightning strike count.";
   }
 
   identity average-distance {
-    base measurement-type;
+    base transducer-type;
     description "Average lightning distance (km).";
   }
 
   /* --- Orientation --- */
 
   identity tilt {
-    base measurement-type;
+    base transducer-type;
     description "Sensor tilt measurement (degrees).";
   }
 
   /* --- Orientation (accelerometer) --- */
 
   identity x-orientation {
-    base measurement-type;
+    base transducer-type;
     description "X-axis orientation (raw accelerometer data).";
   }
 
   identity y-orientation {
-    base measurement-type;
+    base transducer-type;
     description "Y-axis orientation (raw accelerometer data).";
   }
 
   /* --- Wind components --- */
 
   identity north-wind-speed {
-    base measurement-type;
+    base transducer-type;
     description "North wind speed component (m/s).";
   }
 
   identity east-wind-speed {
-    base measurement-type;
+    base transducer-type;
     description "East wind speed component (m/s).";
   }
 
@@ -168,7 +168,7 @@ module coreconf-m2m {
   /* Shared grouping used by notifications                                */
   /* ------------------------------------------------------------------ */
 
-  grouping measurements-list {
+  grouping transducers-list {
     list time-series {
       key "type id";
       description
@@ -176,7 +176,7 @@ module coreconf-m2m {
 
       leaf type {
         type identityref {
-          base measurement-type;
+          base transducer-type;
         }
         description "The type of measurement (e.g., air-temperature).";
       }
@@ -262,19 +262,19 @@ module coreconf-m2m {
   /* Measurements Configuration & Data                                    */
   /* ------------------------------------------------------------------ */
 
-  container measurements {
+  container transducers {
     // config true (default);
     description
       "Current measurement values accessible via polling or configuration.";
 
-    list measurement {
+    list transducer {
       key "type id";
       description
         "List of available measurements.";
 
       leaf type {
         type identityref {
-          base measurement-type;
+          base transducer-type;
         }
         description "The type of measurement.";
       }
@@ -436,7 +436,7 @@ module coreconf-m2m {
   /* Notifications                                                        */
   /* ------------------------------------------------------------------ */
 
-  notification measurement-push {
+  notification transducer-push {
     description
       "Measurement event sent to observers of the notification stream.
        To receive this, a CoLA/CoMI client must Observe the stream resource.";
@@ -447,7 +447,7 @@ module coreconf-m2m {
       description "True if this is the last notification for the current series.";
     }
 
-    uses measurements-list {
+    uses transducers-list {
       augment "time-series" {
         container internal {
           description "Internal operational state for this time-series entry.";
@@ -480,7 +480,7 @@ module coreconf-m2m {
 
       leaf type {
         type identityref {
-          base measurement-type;
+          base transducer-type;
         }
       }
 

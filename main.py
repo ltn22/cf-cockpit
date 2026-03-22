@@ -46,7 +46,7 @@ class RemoteDevice:
 
     async def bootstrap_db(self):
         module_name = self.yang_model_name.split('@')[0].replace(".sid", "")
-        xpath = f"/{module_name}:measurements/measurement"
+        xpath = f"/{module_name}:transducers/transducer"
 
         if xpath not in self.model.sids:
             log.error("xpath not found in SIDs: %s", xpath)
@@ -78,7 +78,7 @@ class RemoteDevice:
             log.error("CoAP request failed: %s", e)
             return False
 
-        db_xpath = f"{module_name}:measurements/measurement"
+        db_xpath = f"{module_name}:transducers/transducer"
 
         try:
             filters = self.db.get_keys(db_xpath)
@@ -94,7 +94,7 @@ class RemoteDevice:
 
     async def fetch_measurement(self, f: str) -> bool:
         module_name = self.yang_model_name.split('@')[0].replace(".sid", "")
-        db_xpath = f"{module_name}:measurements/measurement"
+        db_xpath = f"{module_name}:transducers/transducer"
         xpath = f"/{db_xpath}{f}/value"
 
         try:
@@ -135,7 +135,7 @@ class RemoteDevice:
 
     async def fetch_statistics(self, f: str) -> bool:
         module_name = self.yang_model_name.split('@')[0].replace(".sid", "")
-        db_xpath = f"{module_name}:measurements/measurement"
+        db_xpath = f"{module_name}:transducers/transducer"
         xpath = f"/{db_xpath}{f}/statistics"
 
         try:
@@ -176,7 +176,7 @@ class RemoteDevice:
 
     async def refresh_all_measurements(self) -> bool:
         module_name = self.yang_model_name.split('@')[0].replace(".sid", "")
-        db_xpath = f"{module_name}:measurements/measurement"
+        db_xpath = f"{module_name}:transducers/transducer"
         xpath = f"/{db_xpath}"
 
         measurements_sid = self.model.sids[xpath]
@@ -211,7 +211,7 @@ class RemoteDevice:
             return False
 
         module_name = self.yang_model_name.split('@')[0].replace(".sid", "")
-        db_xpath = f"{module_name}:measurements/measurement"
+        db_xpath = f"{module_name}:transducers/transducer"
         xpath = f"/{db_xpath}{f}/notification-parameters"
 
         precision = self.db[db_xpath + f].get('precision', 0)
@@ -566,7 +566,7 @@ class CockpitDashboardApp:
         if not self.device.db:
             return
         module_name = self.device.yang_model_name.split('@')[0].replace(".sid", "")
-        db_xpath = f"{module_name}:measurements/measurement"
+        db_xpath = f"{module_name}:transducers/transducer"
         try:
             data = self.device.db[db_xpath + f]
             unit = data.get('unit', '')
@@ -614,7 +614,7 @@ class CockpitDashboardApp:
         if not self.device.db:
             return
         module_name = self.device.yang_model_name.split('@')[0].replace(".sid", "")
-        db_xpath = f"{module_name}:measurements/measurement"
+        db_xpath = f"{module_name}:transducers/transducer"
         measurement_path = db_xpath + f
         try:
             data = self.device.db[measurement_path]
@@ -634,7 +634,7 @@ class CockpitDashboardApp:
         if not self.device.db:
             return
         module_name = self.device.yang_model_name.split('@')[0].replace(".sid", "")
-        db_xpath = f"{module_name}:measurements/measurement"
+        db_xpath = f"{module_name}:transducers/transducer"
         measurement_path = db_xpath + f
         try:
             data = self.device.db[measurement_path]
@@ -701,7 +701,7 @@ class CockpitDashboardApp:
             return
 
         module_name = self.device.yang_model_name.split('@')[0].replace(".sid", "")
-        db_xpath = f"{module_name}:measurements/measurement"
+        db_xpath = f"{module_name}:transducers/transducer"
 
         try:
             filters = self.device.db.get_keys(db_xpath)
