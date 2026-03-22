@@ -285,13 +285,6 @@ module coreconf-m2m {
           "Instance identifier to distinguish multiple sensors of the same type.";
       }
 
-      leaf value {
-        type int64;
-        mandatory true;
-        description
-          "The current raw integer value of the measurement.";
-      }
-
       leaf unit {
         type string;
         description "Unit of measurement (e.g., 'C', 'm/s', '%').";
@@ -309,12 +302,18 @@ module coreconf-m2m {
 
       container quantity {
         config false;
-        description "Internal operational state for this transducer.";
+        description "Operational state for this transducer.";
+
+        leaf value {
+          type int64;
+          description
+            "The current raw integer value of the transducer.";
+        }
 
         leaf last-update {
           type uint64;
           units "seconds";
-          description "Epoch timestamp of the last time this measurement was updated.";
+          description "Epoch timestamp of the last time this transducer was updated.";
         }
       }
 

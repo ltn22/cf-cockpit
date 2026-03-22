@@ -86,16 +86,14 @@ class RemoteDevice:
             log.error("get_keys failed: %s", e)
             return False
 
-        log.info("Bootstrap: %d measurement(s) found: %s", len(filters), filters)
-        for f in filters:
-            self.db[db_xpath + f] = {'quantity': {'last-update': int(time.time())}}
+        log.info("Bootstrap: %d transducer(s) found: %s", len(filters), filters)
 
         return True
 
     async def fetch_measurement(self, f: str) -> bool:
         module_name = self.yang_model_name.split('@')[0].replace(".sid", "")
         db_xpath = f"{module_name}:transducers/transducer"
-        xpath = f"/{db_xpath}{f}/value"
+        xpath = f"/{db_xpath}{f}/quantity/value"
 
         try:
             target_sid, key_values = self.db._resolve_path(xpath)
@@ -125,8 +123,8 @@ class RemoteDevice:
             log.debug("Response payload (CBOR hex): %s (%d bytes)", response.payload.hex(), len(response.payload))
             new_db = self.model.loadDB(response.payload)
             log.debug("Measurement JSON:\n%s", json.dumps(json.loads(new_db.to_json()), indent=2))
-            self.db[db_xpath + f + "/value"] = new_db[db_xpath + f + "/value"]
-            self.db[db_xpath + f] = {'quantity': {'last-update': int(time.time())}}
+            self.db[db_xpath + f + "/quantity/value"] = new_db[db_xpath + f + "/quantity/value"]
+            self.db[db_xpath + f + "/quantity/last-update"] = int(time.time())
         except Exception as e:
             log.error("fetch_measurement failed: %s", e)
             return False
@@ -195,8 +193,8 @@ class RemoteDevice:
             new_db = self.model.loadDB(response.payload)
             filters = self.db.get_keys(db_xpath)
             for f in filters:
-                self.db[db_xpath + f + "/value"] = new_db[db_xpath + f + "/value"]
-                self.db[db_xpath + f] = {'quantity': {'last-update': int(time.time())}}
+                self.db[db_xpath + f + "/quantity/value"] = new_db[db_xpath + f + "/quantity/value"]
+                self.db[db_xpath + f + "/quantity/last-update"] = int(time.time())
             return True
         except Exception as e:
             log.error("refresh_all_measurements failed: %s", e)
@@ -618,12 +616,12 @@ class CockpitDashboardApp:
         measurement_path = db_xpath + f
         try:
             data = self.device.db[measurement_path]
-            raw = data.get('value')
+            quantity = data.get('quantity', {})
+            raw = quantity.get('value')
             precision = data.get('precision', 0)
             value = raw / 10**precision if raw is not None else '---'
             unit = data.get('unit', '')
-            internal = data.get('quantity', {})
-            last_update = int(internal.get('last-update', 0))
+            last_update = int(quantity.get('last-update', 0))
             display_text = f"{value} {unit}"
             if f in self.cards:
                 self.cards[f].update_data(display_text, last_update)
@@ -717,12 +715,12 @@ class CockpitDashboardApp:
                 data = self.device.db[measurement_path]
 
                 m_type = data.get('type', 'Unknown').split(':')[-1]
-                raw = data.get('value')
+                quantity = data.get('quantity', {})
+                raw = quantity.get('value')
                 precision = data.get('precision', 0)
                 value = raw / 10**precision if raw is not None else '---'
                 unit = data.get('unit', '')
-                internal = data.get('quantity', {})
-                last_update = int(internal.get('last-update', 0))
+                last_update = int(quantity.get('last-update', 0))
                 display_text = f"{value} {unit}"
 
                 if f in self.cards:
