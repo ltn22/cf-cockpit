@@ -175,35 +175,6 @@ class RemoteDevice:
 
         return True
 
-    async def refresh_all_measurements(self) -> bool:
-        module_name = self.yang_model_name.split('@')[0].replace(".sid", "")
-        db_xpath = f"{module_name}:transducers/transducer"
-        xpath = f"/{db_xpath}"
-
-        measurements_sid = self.model.sids[xpath]
-        port_str = f":{self.server_port}" if self.server_port else ""
-        uri = f"coap://{self.server_host}{port_str}/c"
-
-        log.info("FETCH ALL %s  (SID=%s)", uri, measurements_sid)
-        payload = cbor.dumps(measurements_sid)
-        request = aiocoap.Message(code=aiocoap.FETCH, uri=uri, payload=payload)
-        request.opt.content_format = 142
-        request.opt.accept = 142
-
-        try:
-            response = await asyncio.wait_for(self.protocol.request(request).response, timeout=5.0)
-            log.info("Response code: %s  payload: %d bytes", response.code, len(response.payload))
-            new_db = self.model.loadDB(response.payload)
-            filters = self.db.get_keys(db_xpath)
-            for f in filters:
-                self.db[db_xpath + f + "/quantity/value"] = new_db[db_xpath + f + "/quantity/value"]
-                _t = time.time_ns()
-                self.db[db_xpath + f + "/quantity/timestamp"] = _t // 1_000_000_000
-                self.db[db_xpath + f + "/quantity/u-timestamp"] = (_t % 1_000_000_000) // 1_000
-            return True
-        except Exception as e:
-            log.error("refresh_all_measurements failed: %s", e)
-            return False
 
     async def observe_threshold(self, f: str, t_min, t_max, hysteresis: int = 5) -> bool:
         # TODO: implement CoAP iPATCH to set notification-parameters/t-min and t-max
