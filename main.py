@@ -126,7 +126,7 @@ class RemoteDevice:
             self.db[db_xpath + f + "/quantity/value"] = new_db[db_xpath + f + "/quantity/value"]
             _t = time.time_ns()
             self.db[db_xpath + f + "/quantity/timestamp"] = _t // 1_000_000_000
-            self.db[db_xpath + f + "/quantity/usec"] = (_t % 1_000_000_000) // 1_000
+            self.db[db_xpath + f + "/quantity/u-timestamp"] = (_t % 1_000_000_000) // 1_000
         except Exception as e:
             log.error("fetch_measurement failed: %s", e)
             return False
@@ -198,7 +198,7 @@ class RemoteDevice:
                 self.db[db_xpath + f + "/quantity/value"] = new_db[db_xpath + f + "/quantity/value"]
                 _t = time.time_ns()
                 self.db[db_xpath + f + "/quantity/timestamp"] = _t // 1_000_000_000
-                self.db[db_xpath + f + "/quantity/usec"] = (_t % 1_000_000_000) // 1_000
+                self.db[db_xpath + f + "/quantity/u-timestamp"] = (_t % 1_000_000_000) // 1_000
             return True
         except Exception as e:
             log.error("refresh_all_measurements failed: %s", e)
