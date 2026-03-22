@@ -121,9 +121,10 @@ class RemoteDevice:
             response = await asyncio.wait_for(self.protocol.request(request).response, timeout=5.0)
             log.info("Response code: %s  payload: %d bytes", response.code, len(response.payload))
             log.debug("Response payload (CBOR hex): %s (%d bytes)", response.payload.hex(), len(response.payload))
-            new_db = self.model.loadDB(response.payload)
-            log.debug("Measurement JSON:\n%s", json.dumps(json.loads(new_db.to_json()), indent=2))
-            self.db[db_xpath + f + "/quantity/value"] = new_db[db_xpath + f + "/quantity/value"]
+            decoded = json.loads(self.model.toJSON(response.payload))
+            log.debug("Measurement JSON:\n%s", json.dumps(decoded, indent=2))
+            raw_value = decoded.get(f"{module_name}:transducers/transducer/quantity/value")
+            self.db[db_xpath + f + "/quantity/value"] = raw_value
             _t = time.time_ns()
             self.db[db_xpath + f + "/quantity/timestamp"] = _t // 1_000_000_000
             self.db[db_xpath + f + "/quantity/u-timestamp"] = (_t % 1_000_000_000) // 1_000
