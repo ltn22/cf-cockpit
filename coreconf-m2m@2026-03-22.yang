@@ -442,7 +442,7 @@ module coreconf-m2m {
   /* Notifications                                                        */
   /* ------------------------------------------------------------------ */
 
-  notification transducer-push {
+  notification history {
     description
       "Measurement event sent to observers of the notification stream.
        To receive this, a CoLA/CoMI client must Observe the stream resource.";
