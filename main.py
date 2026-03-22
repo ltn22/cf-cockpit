@@ -124,7 +124,9 @@ class RemoteDevice:
             new_db = self.model.loadDB(response.payload)
             log.debug("Measurement JSON:\n%s", json.dumps(json.loads(new_db.to_json()), indent=2))
             self.db[db_xpath + f + "/quantity/value"] = new_db[db_xpath + f + "/quantity/value"]
-            self.db[db_xpath + f + "/quantity/last-update"] = int(time.time())
+            _t = time.time_ns()
+            self.db[db_xpath + f + "/quantity/timestamp"] = _t // 1_000_000_000
+            self.db[db_xpath + f + "/quantity/usec"] = (_t % 1_000_000_000) // 1_000
         except Exception as e:
             log.error("fetch_measurement failed: %s", e)
             return False
@@ -194,7 +196,9 @@ class RemoteDevice:
             filters = self.db.get_keys(db_xpath)
             for f in filters:
                 self.db[db_xpath + f + "/quantity/value"] = new_db[db_xpath + f + "/quantity/value"]
-                self.db[db_xpath + f + "/quantity/last-update"] = int(time.time())
+                _t = time.time_ns()
+                self.db[db_xpath + f + "/quantity/timestamp"] = _t // 1_000_000_000
+                self.db[db_xpath + f + "/quantity/usec"] = (_t % 1_000_000_000) // 1_000
             return True
         except Exception as e:
             log.error("refresh_all_measurements failed: %s", e)
@@ -621,7 +625,7 @@ class CockpitDashboardApp:
             precision = data.get('precision', 0)
             value = raw / 10**precision if raw is not None else '---'
             unit = data.get('unit', '')
-            last_update = int(quantity.get('last-update', 0))
+            last_update = int(quantity.get('timestamp', 0))
             display_text = f"{value} {unit}"
             if f in self.cards:
                 self.cards[f].update_data(display_text, last_update)
@@ -720,7 +724,7 @@ class CockpitDashboardApp:
                 precision = data.get('precision', 0)
                 value = raw / 10**precision if raw is not None else '---'
                 unit = data.get('unit', '')
-                last_update = int(quantity.get('last-update', 0))
+                last_update = int(quantity.get('timestamp', 0))
                 display_text = f"{value} {unit}"
 
                 if f in self.cards:

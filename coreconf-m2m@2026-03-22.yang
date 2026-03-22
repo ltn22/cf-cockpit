@@ -310,10 +310,17 @@ module coreconf-m2m {
             "The current raw integer value of the transducer.";
         }
 
-        leaf last-update {
+        leaf timestamp {
           type uint64;
           units "seconds";
-          description "Epoch timestamp of the last time this transducer was updated.";
+          description "Epoch timestamp (seconds) of the last transducer update.";
+        }
+
+        leaf usec {
+          type uint32;
+          units "microseconds";
+          description
+            "Microsecond fraction of the timestamp (0..999999).";
         }
       }
 
