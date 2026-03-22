@@ -218,15 +218,15 @@ class RemoteDevice:
 
         precision = self.db[db_xpath + f].get('precision', 0)
 
-        notif_params = {}
+        sensor_alert = {}
         if t_max:
-            notif_params ["t-max"] = int(t_max * (10 ** precision))
+            sensor_alert["t-max"] = int(t_max * (10 ** precision))
         if t_min:
-            notif_params["t-min"] = int(t_min * (10 ** precision))
+            sensor_alert["t-min"] = int(t_min * (10 ** precision))
         if hysteresis != 5:
-            notif_params["hysteresis"] = hysteresis
-        
-        qualified_payload = {db_xpath+'/notification-parameters': notif_params}
+            sensor_alert["hysteresis"] = hysteresis
+
+        qualified_payload = {db_xpath+'/notification-parameters': {'sensor-alert': sensor_alert}}
         payload = self.model.toCORECONF(json.dumps(qualified_payload))
 
         xpath_key= self.db._resolve_path(xpath)
@@ -572,10 +572,10 @@ class CockpitDashboardApp:
         try:
             data = self.device.db[db_xpath + f]
             unit = data.get('unit', '')
-            notif = data.get('notification-parameters', {})
-            t_min = notif.get('t-min')
-            t_max = notif.get('t-max')
-            hysteresis = notif.get('hysteresis', 5)
+            sa = data.get('notification-parameters', {}).get('sensor-alert', {})
+            t_min = sa.get('t-min')
+            t_max = sa.get('t-max')
+            hysteresis = sa.get('hysteresis', 5)
         except KeyError:
             unit, t_min, t_max, hysteresis = '', None, None, 5
 

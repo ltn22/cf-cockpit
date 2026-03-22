@@ -326,57 +326,71 @@ module coreconf-m2m {
 
       container notification-parameters {
         description
-          "Configuration parameters controlling how this measurement
+          "Configuration parameters controlling how this transducer
            is reported in CoMI notification streams.";
 
-        leaf precision {
-          type uint8;
-          default 1;
-          description
-            "Number of decimal places for values encoded in time-series notifications.
-             Real value = raw_value * 10^-precision.
-             This precision applies to the time-series values sent in measurement-push
-             notifications, not to the current measurement value.";
-        }
+        container history {
+          description "Parameters for the history time-series stream.";
 
-        leaf encoding {
-          type encoding-type;
-          default "delta";
-          description
-            "Encoding used for the values list in notifications.";
-        }
-
-        leaf step {
-          type uint32;
-          units "milliseconds";
-          description "Time interval between samples in the notification stream.";
-        }
-
-        leaf t-min {
-          type int32;
-          description
-            "Minimum threshold value. A sensor-alert is raised when the
-             measurement falls below this value.";
-        }
-
-        leaf t-max {
-          type int32;
-          description
-            "Maximum threshold value. A sensor-alert is raised when the
-             measurement exceeds this value.";
-        }
-
-        leaf hysteresis {
-          type uint8 {
-            range "0..100";
+          leaf step {
+            type uint32;
+            units "milliseconds";
+            description "Time interval between samples in the notification stream.";
           }
-          default 5;
-          units "percent";
-          description
-            "Hysteresis applied to threshold crossings, expressed as a
-             percentage of the threshold value. An alert is cleared only
-             when the measurement returns past the threshold by at least
-             this percentage, preventing rapid re-triggering.";
+
+          leaf precision {
+            type uint8;
+            default 1;
+            description
+              "Number of decimal places for values encoded in time-series notifications.
+               Real value = raw_value * 10^-precision.";
+          }
+
+          leaf max-samples {
+            type uint32;
+            description "Maximum number of samples kept in the time-series buffer.";
+          }
+
+          leaf time-period {
+            type uint32;
+            units "seconds";
+            description "Duration of the time window covered by the history buffer.";
+          }
+
+          leaf encoding {
+            type encoding-type;
+            default "delta";
+            description "Encoding used for the values list in notifications.";
+          }
+        }
+
+        container sensor-alert {
+          description "Parameters for threshold-based sensor-alert notifications.";
+
+          leaf t-min {
+            type int32;
+            description
+              "Minimum threshold value. A sensor-alert is raised when the
+               transducer value falls below this value.";
+          }
+
+          leaf t-max {
+            type int32;
+            description
+              "Maximum threshold value. A sensor-alert is raised when the
+               transducer value exceeds this value.";
+          }
+
+          leaf hysteresis {
+            type uint8 {
+              range "0..100";
+            }
+            default 5;
+            units "percent";
+            description
+              "Hysteresis applied to threshold crossings, expressed as a
+               percentage of the threshold value.";
+          }
         }
       }
 
