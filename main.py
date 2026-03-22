@@ -11,6 +11,9 @@ import tkinter as tk
 from tkinter import ttk
 from queue import Queue
 
+def _no_data(precision: int) -> str:
+    return '---' if precision == 0 else f"---.{'-' * precision}"
+
 def _parse_float_or_none(s: str):
     """Parse a string to float, returning None if blank or non-numeric."""
     s = s.strip()
@@ -35,6 +38,7 @@ class RemoteDevice:
         self.protocol = None
         self._observations = {}  # obs_key -> asyncio.Task or obs object
         self._token_to_f = {}   # token_hex -> f
+        self.queue = None        # set by CockpitDashboardApp
 
     async def init_model(self):
         sid_file = self.yang_model_name if self.yang_model_name.endswith('.sid') else f"{self.yang_model_name}.sid"
@@ -124,10 +128,13 @@ class RemoteDevice:
             decoded = json.loads(self.model.toJSON(response.payload))
             log.debug("Measurement JSON:\n%s", json.dumps(decoded, indent=2))
             raw_value = decoded.get(f"{module_name}:transducers/transducer/quantity/value")
-            self.db[db_xpath + f + "/quantity/value"] = raw_value
             _t = time.time_ns()
-            self.db[db_xpath + f + "/quantity/timestamp"] = _t // 1_000_000_000
-            self.db[db_xpath + f + "/quantity/u-timestamp"] = (_t % 1_000_000_000) // 1_000
+            self.db[db_xpath + f] = {"quantity": {"value": raw_value, 
+                                                  "timestamp": _t // 1_000_000_000, 
+                                                  "u-timestamp": (_t % 1_000_000_000) // 1_000}}
+
+            import pprint
+            pprint.pprint(json.loads(self.db.to_json()))
         except Exception as e:
             log.error("fetch_measurement failed: %s", e)
             return False
@@ -227,6 +234,100 @@ class RemoteDevice:
             log.error("observe_threshold: request failed: %s", e)
             return False
 
+    async def observe_history(self, f: str, step_ms: int = 120000, max_samples: int = 30) -> bool:
+        module_name = self.yang_model_name.split('@')[0].replace(".sid", "")
+        db_xpath = f"{module_name}:transducers/transducer"
+        xpath = f"/{db_xpath}{f}/notification-parameters"
+
+        qualified_payload = {db_xpath + '/notification-parameters': {
+            'history': {'step': step_ms, 'max-samples': max_samples, 'encoding': 'delta'}
+        }}
+        payload = self.model.toCORECONF(json.dumps(qualified_payload))
+
+        xpath_key = self.db._resolve_path(xpath)
+        ipatch_key = [xpath_key[0]] + xpath_key[1]
+        ipatch_query = cbor.dumps({tuple(ipatch_key): cbor.loads(payload)})
+
+        log.info("observe_history iPATCH %s  step=%dms max_samples=%d", xpath, step_ms, max_samples)
+
+        port_str = f":{self.server_port}" if self.server_port else ""
+        uri = f"coap://{self.server_host}{port_str}/c"
+
+        request = aiocoap.Message(
+            code=aiocoap.numbers.codes.Code(7),  # iPATCH
+            uri=uri,
+            payload=ipatch_query
+        )
+        request.opt.content_format = 142
+
+        try:
+            response = await asyncio.wait_for(self.protocol.request(request).response, timeout=5.0)
+            log.info("observe_history iPATCH response: %s", response.code)
+            if not response.code.is_successful():
+                return False
+        except Exception as e:
+            log.error("observe_history iPATCH failed: %s", e)
+            return False
+
+        # FETCH+Observe on /s for history/time-series
+        xpath_ts = f"/{module_name}:history/time-series{f}"
+        try:
+            target_sid, key_values = self.db._resolve_path(xpath_ts)
+        except (KeyError, ValueError) as e:
+            log.error("observe_history: cannot resolve %s: %s", xpath_ts, e)
+            return False
+
+        instance_id = [target_sid] + key_values
+        uri_s = f"coap://{self.server_host}{port_str}/s"
+        payload_s = cbor.dumps(instance_id)
+
+        log.info("observe_history FETCH+Observe %s  instance=%s", uri_s, instance_id)
+
+        request_s = aiocoap.Message(code=aiocoap.FETCH, uri=uri_s, payload=payload_s)
+        request_s.opt.content_format = 142
+        request_s.opt.accept = 142
+        request_s.opt.observe = 0
+
+        obs_key = f"history{f}"
+        if obs_key in self._observations:
+            self._observations[obs_key].cancel()
+
+        obs = self.protocol.request(request_s)
+        try:
+            first = await asyncio.wait_for(obs.response, timeout=5.0)
+            token_hex = first.token.hex()
+            self._token_to_f[token_hex] = f
+            log.info("observe_history: first response %s  token=%s -> f=%s", first.code, token_hex, f)
+        except Exception as e:
+            log.error("observe_history: first response failed: %s", e)
+            return False
+
+        self._observations[f"{obs_key}-obs"] = obs
+        self._observations[obs_key] = asyncio.ensure_future(self._watch_history(obs_key, obs))
+        return True
+
+    async def _watch_history(self, obs_key: str, obs):
+        log.info("_watch_history[%s]: started", obs_key)
+        try:
+            async for response in obs.observation:
+                token_hex = response.token.hex()
+                f = self._token_to_f.get(token_hex, obs_key)
+                log.info("_watch_history token=%s f=%s: %s", token_hex, f, response.code)
+                try:
+                    new_db = self.model.loadDB(response.payload)
+                    decoded = json.loads(new_db.to_json())
+                    log.info("_watch_history values: %s", json.dumps(decoded))
+                    if self.queue:
+                        self.queue.put(('history', f, decoded))
+                except Exception as e:
+                    log.error("_watch_history decode error: %s  hex: %s", e, response.payload.hex())
+            log.warning("_watch_history[%s]: stream ended", obs_key)
+        except asyncio.CancelledError:
+            obs.observation.cancel()
+            log.info("_watch_history[%s]: cancelled", obs_key)
+        except Exception as e:
+            log.error("_watch_history[%s]: error: %s", obs_key, e)
+
     async def observe_sensor_alert(self, f: str) -> bool:
         module_name = self.yang_model_name.split('@')[0].replace(".sid", "")
         xpath = f"/{module_name}:sensor-alert/target{f}"
@@ -280,14 +381,31 @@ class RemoteDevice:
             async for response in obs.observation:
                 token_hex = response.token.hex()
                 f = self._token_to_f.get(token_hex, obs_key)
+                log.info("_watch_observation token=%s f=%s: %s", token_hex, f, response.code)
+                if self.queue:
+                    self.queue.put(('alert', f, True))
                 try:
                     new_db = self.model.loadDB(response.payload)
                     decoded = json.loads(new_db.to_json())
-                    log.info("_watch_observation token=%s f=%s: %s  values: %s",
-                             token_hex, f, response.code, json.dumps(decoded))
+                    log.info("_watch_observation values: %s", json.dumps(decoded))
+                    # Extraire la valeur du premier target et mettre à jour la db
+                    module_name = self.yang_model_name.split('@')[0].replace(".sid", "")
+                    targets = decoded.get(f"{module_name}:sensor-alert/target", [])
+                    if targets:
+                        raw_value = targets[0].get('value')
+                        db_xpath = f"{module_name}:transducers/transducer"
+                        _t = time.time_ns()
+                        self.db[db_xpath + f] = {
+                            'quantity': {
+                                'value': raw_value,
+                                'timestamp': _t // 1_000_000_000,
+                                'u-timestamp': (_t % 1_000_000_000) // 1_000,
+                            }
+                        }
+                        if self.queue:
+                            self.queue.put(('refresh', f, True))
                 except Exception as e:
-                    log.error("_watch_observation token=%s f=%s: decode error: %s  hex: %s",
-                              token_hex, f, e, response.payload.hex())
+                    log.error("_watch_observation decode error: %s  hex: %s", e, response.payload.hex())
             log.warning("_watch_observation[%s]: observation stream ended", obs_key)
         except asyncio.CancelledError:
             obs.observation.cancel()
@@ -403,9 +521,11 @@ class MeasurementCard(tk.Frame):
                                         relief=tk.FLAT, padx=6, pady=2,
                                         command=self._on_thresholds)
         self._threshold_btn.pack(side=tk.LEFT, padx=2)
-        tk.Button(btn_frame, text="Follow", bg='#888', fg='#003080',
-                  activebackground='#999', activeforeground='#003080',
-                  relief=tk.FLAT, padx=6, pady=2).pack(side=tk.LEFT, padx=2)
+        self._follow_btn = tk.Button(btn_frame, text="Follow", bg='#888', fg='#003080',
+                                     activebackground='#999', activeforeground='#003080',
+                                     relief=tk.FLAT, padx=6, pady=2,
+                                     command=self._on_follow)
+        self._follow_btn.pack(side=tk.LEFT, padx=2)
 
         # Right: stats panel (hidden until first fetch)
         self.stats_frame = tk.Frame(self, bg='#003080', padx=8, pady=6)
@@ -423,6 +543,7 @@ class MeasurementCard(tk.Frame):
         self._refresh_callback = None
         self._stats_callback = None
         self._thresholds_callback = None
+        self._follow_callback = None
 
     def set_refresh_callback(self, cb):
         self._refresh_callback = cb
@@ -432,6 +553,17 @@ class MeasurementCard(tk.Frame):
 
     def set_thresholds_callback(self, cb):
         self._thresholds_callback = cb
+
+    def set_follow_callback(self, cb):
+        self._follow_callback = cb
+
+    def set_follow_active(self, active: bool):
+        if active:
+            self._follow_btn.config(bg='#003080', fg='white',
+                                    activebackground='#0050b0', activeforeground='white')
+        else:
+            self._follow_btn.config(bg='#888', fg='#003080',
+                                    activebackground='#999', activeforeground='#003080')
 
     def set_thresholds_active(self, active: bool):
         if active:
@@ -453,6 +585,22 @@ class MeasurementCard(tk.Frame):
         if self._thresholds_callback:
             self._thresholds_callback()
 
+    def _on_follow(self):
+        if self._follow_callback:
+            self._follow_callback()
+
+    def set_alert(self, active: bool):
+        bg = '#550000' if active else '#1e1e2e'
+        self._set_bg_recursive(self, bg)
+
+    def _set_bg_recursive(self, widget, bg):
+        try:
+            widget.configure(bg=bg)
+        except tk.TclError:
+            pass
+        for child in widget.winfo_children():
+            self._set_bg_recursive(child, bg)
+
     def update_data(self, display_text: str, last_up: int):
         self.val_label.config(text=display_text)
         self.last_up = last_up
@@ -461,7 +609,7 @@ class MeasurementCard(tk.Frame):
         factor = 10 ** precision
 
         def fmt(raw):
-            return f"{raw / factor} {unit}" if raw is not None else '---'
+            return f"{raw / factor} {unit}" if raw is not None else _no_data(precision)
 
         self._stats_labels['min'].config(text=fmt(stats.get('min')))
         self._stats_labels['max'].config(text=fmt(stats.get('max')))
@@ -485,6 +633,7 @@ class CockpitDashboardApp:
         self.device = device
         self.cards = {}
         self.queue = Queue()
+        self.device.queue = self.queue
 
         self.root = tk.Tk()
         self.root.title("Cockpit2 Dashboard")
@@ -558,6 +707,14 @@ class CockpitDashboardApp:
             )
         )
 
+    def _follow_card(self, f: str):
+        asyncio.run_coroutine_threadsafe(self._async_observe_history(f), self.loop)
+
+    async def _async_observe_history(self, f: str):
+        success = await self.device.observe_history(f)
+        if success:
+            self.queue.put(('follow_active', f, True))
+
     async def _async_set_and_observe(self, f: str, t_min, t_max, hysteresis: int):
         success = await self.device.observe_threshold(f, t_min, t_max, hysteresis)
         if success:
@@ -569,6 +726,7 @@ class CockpitDashboardApp:
         try:
             while not self.queue.empty():
                 msg = self.queue.get()
+                log.info("_process_queue: %s", msg)
                 try:
                     if msg[0] == 'update' and msg[1]:
                         self.update_ui()
@@ -579,6 +737,14 @@ class CockpitDashboardApp:
                     elif msg[0] == 'threshold_active':
                         if msg[1] in self.cards:
                             self.cards[msg[1]].set_thresholds_active(msg[2])
+                    elif msg[0] == 'alert':
+                        if msg[1] in self.cards:
+                            self.cards[msg[1]].set_alert(msg[2])
+                    elif msg[0] == 'follow_active':
+                        if msg[1] in self.cards:
+                            self.cards[msg[1]].set_follow_active(msg[2])
+                    elif msg[0] == 'history':
+                        log.info("history notification f=%s: %s", msg[1], json.dumps(msg[2]))
                 except Exception as e:
                     log.error("_process_queue: error handling %s: %s", msg[0], e)
         finally:
@@ -592,17 +758,18 @@ class CockpitDashboardApp:
         measurement_path = db_xpath + f
         try:
             data = self.device.db[measurement_path]
-            quantity = data.get('quantity', {})
+            log.debug("_update_card %s data=%s", f, data)
+            quantity = data.get('quantity', {}) if data else {}
             raw = quantity.get('value')
-            precision = data.get('precision', 0)
-            value = raw / 10**precision if raw is not None else '---'
-            unit = data.get('unit', '')
+            precision = data.get('precision', 0) if data else 0
+            value = raw / 10**precision if raw is not None else _no_data(precision)
+            unit = data.get('unit', '') if data else ''
             last_update = int(quantity.get('timestamp', 0))
             display_text = f"{value} {unit}"
             if f in self.cards:
                 self.cards[f].update_data(display_text, last_update)
-        except KeyError:
-            pass
+        except Exception as e:
+            log.error("_update_card %s: %s", f, e)
 
     def _update_card_stats(self, f: str):
         if not self.device.db:
@@ -693,7 +860,7 @@ class CockpitDashboardApp:
                 quantity = data.get('quantity', {})
                 raw = quantity.get('value')
                 precision = data.get('precision', 0)
-                value = raw / 10**precision if raw is not None else '---'
+                value = raw / 10**precision if raw is not None else _no_data(precision)
                 unit = data.get('unit', '')
                 last_update = int(quantity.get('timestamp', 0))
                 display_text = f"{value} {unit}"
@@ -705,6 +872,7 @@ class CockpitDashboardApp:
                     card.set_refresh_callback(lambda key=f: self._refresh_card(key))
                     card.set_stats_callback(lambda key=f: self._stats_card(key))
                     card.set_thresholds_callback(lambda key=f: self._thresholds_card(key))
+                    card.set_follow_callback(lambda key=f: self._follow_card(key))
                     card.grid(row=self._grid_row, column=self._grid_col,
                               padx=8, pady=8, sticky='nsew')
                     self.cards[f] = card
