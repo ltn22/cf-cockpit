@@ -88,7 +88,7 @@ class RemoteDevice:
 
         log.info("Bootstrap: %d measurement(s) found: %s", len(filters), filters)
         for f in filters:
-            self.db[db_xpath + f] = {'internal': {'last-update': int(time.time())}}
+            self.db[db_xpath + f] = {'quantity': {'last-update': int(time.time())}}
 
         return True
 
@@ -126,7 +126,7 @@ class RemoteDevice:
             new_db = self.model.loadDB(response.payload)
             log.debug("Measurement JSON:\n%s", json.dumps(json.loads(new_db.to_json()), indent=2))
             self.db[db_xpath + f + "/value"] = new_db[db_xpath + f + "/value"]
-            self.db[db_xpath + f] = {'internal': {'last-update': int(time.time())}}
+            self.db[db_xpath + f] = {'quantity': {'last-update': int(time.time())}}
         except Exception as e:
             log.error("fetch_measurement failed: %s", e)
             return False
@@ -196,7 +196,7 @@ class RemoteDevice:
             filters = self.db.get_keys(db_xpath)
             for f in filters:
                 self.db[db_xpath + f + "/value"] = new_db[db_xpath + f + "/value"]
-                self.db[db_xpath + f] = {'internal': {'last-update': int(time.time())}}
+                self.db[db_xpath + f] = {'quantity': {'last-update': int(time.time())}}
             return True
         except Exception as e:
             log.error("refresh_all_measurements failed: %s", e)
@@ -622,7 +622,7 @@ class CockpitDashboardApp:
             precision = data.get('precision', 0)
             value = raw / 10**precision if raw is not None else '---'
             unit = data.get('unit', '')
-            internal = data.get('internal', {})
+            internal = data.get('quantity', {})
             last_update = int(internal.get('last-update', 0))
             display_text = f"{value} {unit}"
             if f in self.cards:
@@ -721,7 +721,7 @@ class CockpitDashboardApp:
                 precision = data.get('precision', 0)
                 value = raw / 10**precision if raw is not None else '---'
                 unit = data.get('unit', '')
-                internal = data.get('internal', {})
+                internal = data.get('quantity', {})
                 last_update = int(internal.get('last-update', 0))
                 display_text = f"{value} {unit}"
 

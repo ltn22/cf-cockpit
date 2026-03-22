@@ -307,9 +307,9 @@ module coreconf-m2m {
            not to the time-series encoding in notifications.";
       }
 
-      container internal {
+      container quantity {
         config false;
-        description "Internal operational state for this measurement.";
+        description "Internal operational state for this transducer.";
 
         leaf last-update {
           type uint64;
