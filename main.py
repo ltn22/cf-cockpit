@@ -193,7 +193,7 @@ class RemoteDevice:
 
         module_name = self.yang_model_name.split('@')[0].replace(".sid", "")
         db_xpath = f"{module_name}:transducers/transducer"
-        xpath = f"/{db_xpath}{f}/notification-parameters"
+        xpath = f"/{db_xpath}{f}/notification-parameters/sensor-alert"
 
         precision = self.db[db_xpath + f].get('precision', 0)
 
@@ -205,10 +205,10 @@ class RemoteDevice:
         if hysteresis != 5:
             sensor_alert["hysteresis"] = hysteresis
 
-        qualified_payload = {db_xpath+'/notification-parameters': {'sensor-alert': sensor_alert}}
+        qualified_payload = {db_xpath + '/notification-parameters/sensor-alert': sensor_alert}
         payload = self.model.toCORECONF(json.dumps(qualified_payload))
 
-        xpath_key= self.db._resolve_path(xpath)
+        xpath_key = self.db._resolve_path(xpath)
         ipatch_key = [xpath_key[0]] + xpath_key[1]
 
         ipatch_payload_struct = cbor.loads(payload)
@@ -237,10 +237,10 @@ class RemoteDevice:
     async def observe_history(self, f: str, step_ms: int = 120000, max_samples: int = 30) -> bool:
         module_name = self.yang_model_name.split('@')[0].replace(".sid", "")
         db_xpath = f"{module_name}:transducers/transducer"
-        xpath = f"/{db_xpath}{f}/notification-parameters"
+        xpath = f"/{db_xpath}{f}/notification-parameters/history"
 
-        qualified_payload = {db_xpath + '/notification-parameters': {
-            'history': {'step': step_ms, 'max-samples': max_samples, 'encoding': 'delta'}
+        qualified_payload = {db_xpath + '/notification-parameters/history': {
+            'step': step_ms, 'max-samples': max_samples, 'encoding': 'delta'
         }}
         payload = self.model.toCORECONF(json.dumps(qualified_payload))
 

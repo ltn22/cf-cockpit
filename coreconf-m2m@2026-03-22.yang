@@ -332,6 +332,14 @@ module coreconf-m2m {
         container history {
           description "Parameters for the history time-series stream.";
 
+          leaf active {
+            type boolean;
+            default false;
+            description
+              "Enables history time-series notifications for this transducer.
+               When false (default), no history notifications are generated.";
+          }
+
           leaf step {
             type uint32;
             units "milliseconds";
@@ -366,6 +374,14 @@ module coreconf-m2m {
 
         container sensor-alert {
           description "Parameters for threshold-based sensor-alert notifications.";
+
+          leaf active {
+            type boolean;
+            default false;
+            description
+              "Enables sensor-alert notifications for this transducer.
+               When false (default), threshold crossings are not reported.";
+          }
 
           leaf t-min {
             type int32;
