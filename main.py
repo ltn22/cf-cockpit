@@ -197,7 +197,7 @@ class RemoteDevice:
 
         precision = self.db[db_xpath + f].get('precision', 0)
 
-        sensor_alert = {}
+        sensor_alert: dict = {"active": True}
         if t_max:
             sensor_alert["t-max"] = int(t_max * (10 ** precision))
         if t_min:
@@ -240,7 +240,7 @@ class RemoteDevice:
         xpath = f"/{db_xpath}{f}/notification-parameters/history"
 
         qualified_payload = {db_xpath + '/notification-parameters/history': {
-            'step': step_ms, 'max-samples': max_samples, 'encoding': 'delta'
+            'active': True, 'step': step_ms, 'max-samples': max_samples, 'encoding': 'delta'
         }}
         payload = self.model.toCORECONF(json.dumps(qualified_payload))
 
