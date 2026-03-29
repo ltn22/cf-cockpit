@@ -993,7 +993,7 @@ def main():
     parser = argparse.ArgumentParser(description="Cockpit2 GUI Dashboard")
     parser.add_argument("--host", type=str, default="[::1]", help="CoAP Server Host (default: [::1])")
     parser.add_argument("--port", type=int, default=None, help="CoAP Server Port")
-    parser.add_argument("--model", type=str, default="coreconf-m2m@2026-03-22", help="YANG Model Name")
+    parser.add_argument("--model", type=str, default="coreconf-m2m@2026-03-29", help="YANG Model Name")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose network logging")
     args = parser.parse_args()
 
