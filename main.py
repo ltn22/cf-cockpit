@@ -5,11 +5,17 @@ import cbor2 as cbor
 import json
 import logging
 import time
+import re
 import argparse
 import threading
 import tkinter as tk
 from tkinter import ttk
 from queue import Queue
+from influxdb_client_3 import InfluxDBClient3, Point
+
+INFLUX_HOST  = "http://localhost:8181"
+INFLUX_TOKEN = "apiv3_ev3ZbXfHI0ZiHhk2B3ykpWfbF4V7DGpHgjywG_e-3G5qB6gJD5swqRCxHFrPD21BBFipO8rQG3CDjsjx7ZR_Jg"
+INFLUX_DB    = "cockpit"
 
 def _no_data(precision: int) -> str:
     return '---' if precision == 0 else f"---.{'-' * precision}"
@@ -39,6 +45,8 @@ class RemoteDevice:
         self._observations = {}  # obs_key -> asyncio.Task or obs object
         self._token_to_f = {}   # token_hex -> f
         self.queue = None        # set by CockpitDashboardApp
+        self.history_step_ms = 120000
+        self._alert_thresholds = {}  # f -> (t_min_raw, t_max_raw)
 
     async def init_model(self):
         sid_file = self.yang_model_name if self.yang_model_name.endswith('.sid') else f"{self.yang_model_name}.sid"
@@ -76,7 +84,7 @@ class RemoteDevice:
             response = await asyncio.wait_for(self.protocol.request(request).response, timeout=5.0)
             log.info("Response code: %s  payload: %d bytes", response.code, len(response.payload))
             log.debug("Response payload (CBOR hex): %s (%d bytes)", response.payload.hex(), len(response.payload))
-            self.db = self.model.loadDB(response.payload)
+            self.db = self.model.create_datastore(response.payload)
             log.debug("DB as JSON:\n%s", json.dumps(json.loads(self.db.to_json()), indent=2))
         except Exception as e:
             log.error("CoAP request failed: %s", e)
@@ -104,6 +112,8 @@ class RemoteDevice:
         except (KeyError, ValueError) as e:
             log.error("fetch_measurement: cannot resolve xpath %s: %s", xpath, e)
             return False
+
+        log.info("fetch_measurement: xpath=%s target_sid=%s key_values=%s", xpath, target_sid, key_values)
 
         port_str = f":{self.server_port}" if self.server_port else ""
         uri = f"coap://{self.server_host}{port_str}/c"
@@ -229,18 +239,26 @@ class RemoteDevice:
         try:
             response = await asyncio.wait_for(self.protocol.request(request).response, timeout=5.0)
             log.info("observe_threshold: response %s", response.code)
-            return response.code.is_successful()
+            if response.code.is_successful():
+                self._alert_thresholds[f] = (
+                    int(t_min * (10 ** precision)) if t_min is not None else None,
+                    int(t_max * (10 ** precision)) if t_max is not None else None,
+                )
+                return True
+            return False
         except Exception as e:
             log.error("observe_threshold: request failed: %s", e)
             return False
 
     async def observe_history(self, f: str, step_ms: int = 120000, max_samples: int = 30) -> bool:
+        self.history_step_ms = step_ms
         module_name = self.yang_model_name.split('@')[0].replace(".sid", "")
         db_xpath = f"{module_name}:transducers/transducer"
         xpath = f"/{db_xpath}{f}/notification-parameters/history"
 
         qualified_payload = {db_xpath + '/notification-parameters/history': {
-            'active': True, 'step': step_ms, 'max-samples': max_samples, 'encoding': 'delta'
+            'active': True, 'step': step_ms, 'max-samples': max_samples,
+            'encoding': 'delta'
         }}
         payload = self.model.toCORECONF(json.dumps(qualified_payload))
 
@@ -314,11 +332,12 @@ class RemoteDevice:
                 f = self._token_to_f.get(token_hex, obs_key)
                 log.info("_watch_history token=%s f=%s: %s", token_hex, f, response.code)
                 try:
-                    new_db = self.model.loadDB(response.payload)
+                    t_recv_ns = time.time_ns()
+                    new_db = self.model.create_datastore(response.payload)
                     decoded = json.loads(new_db.to_json())
                     log.info("_watch_history values: %s", json.dumps(decoded))
                     if self.queue:
-                        self.queue.put(('history', f, decoded))
+                        self.queue.put(('history', f, decoded, t_recv_ns))
                 except Exception as e:
                     log.error("_watch_history decode error: %s  hex: %s", e, response.payload.hex())
             log.warning("_watch_history[%s]: stream ended", obs_key)
@@ -382,10 +401,8 @@ class RemoteDevice:
                 token_hex = response.token.hex()
                 f = self._token_to_f.get(token_hex, obs_key)
                 log.info("_watch_observation token=%s f=%s: %s", token_hex, f, response.code)
-                if self.queue:
-                    self.queue.put(('alert', f, True))
                 try:
-                    new_db = self.model.loadDB(response.payload)
+                    new_db = self.model.create_datastore(response.payload)
                     decoded = json.loads(new_db.to_json())
                     log.info("_watch_observation values: %s", json.dumps(decoded))
                     # Extraire la valeur du premier target et mettre à jour la db
@@ -402,7 +419,13 @@ class RemoteDevice:
                                 'u-timestamp': (_t % 1_000_000_000) // 1_000,
                             }
                         }
+                        t_min_raw, t_max_raw = self._alert_thresholds.get(f, (None, None))
+                        alert_active = (
+                            (t_min_raw is not None and raw_value < t_min_raw) or
+                            (t_max_raw is not None and raw_value > t_max_raw)
+                        )
                         if self.queue:
+                            self.queue.put(('alert', f, alert_active))
                             self.queue.put(('refresh', f, True))
                 except Exception as e:
                     log.error("_watch_observation decode error: %s  hex: %s", e, response.payload.hex())
@@ -544,6 +567,7 @@ class MeasurementCard(tk.Frame):
         self._stats_callback = None
         self._thresholds_callback = None
         self._follow_callback = None
+        self._stats_hide_id = None
 
     def set_refresh_callback(self, cb):
         self._refresh_callback = cb
@@ -621,6 +645,15 @@ class MeasurementCard(tk.Frame):
         if not self.stats_frame.winfo_ismapped():
             self.stats_frame.pack(side=tk.LEFT, fill=tk.Y)
 
+        if self._stats_hide_id is not None:
+            self.after_cancel(self._stats_hide_id)
+        self._stats_hide_id = self.after(60000, self._hide_stats)
+
+    def _hide_stats(self):
+        self._stats_hide_id = None
+        if self.stats_frame.winfo_ismapped():
+            self.stats_frame.pack_forget()
+
     def check_timeout(self, current_time: int):
         if self.last_up > 0 and (current_time - self.last_up) > 300:
             self.val_label.config(text='---')
@@ -634,6 +667,7 @@ class CockpitDashboardApp:
         self.cards = {}
         self.queue = Queue()
         self.device.queue = self.queue
+        self.influx = InfluxDBClient3(host=INFLUX_HOST, token=INFLUX_TOKEN, database=INFLUX_DB)
 
         self.root = tk.Tk()
         self.root.title("Cockpit2 Dashboard")
@@ -745,6 +779,7 @@ class CockpitDashboardApp:
                             self.cards[msg[1]].set_follow_active(msg[2])
                     elif msg[0] == 'history':
                         log.info("history notification f=%s: %s", msg[1], json.dumps(msg[2]))
+                        self._write_history_to_influx(msg[1], msg[2], msg[3])
                 except Exception as e:
                     log.error("_process_queue: error handling %s: %s", msg[0], e)
         finally:
@@ -767,9 +802,72 @@ class CockpitDashboardApp:
             last_update = int(quantity.get('timestamp', 0))
             display_text = f"{value} {unit}"
             if f in self.cards:
+                t_min_raw, t_max_raw = self.device._alert_thresholds.get(f, (None, None))
+                if raw is not None and (t_min_raw is not None or t_max_raw is not None):
+                    alert_active = (
+                        (t_min_raw is not None and raw < t_min_raw) or
+                        (t_max_raw is not None and raw > t_max_raw)
+                    )
+                    self.cards[f].set_alert(alert_active)
                 self.cards[f].update_data(display_text, last_update)
         except Exception as e:
             log.error("_update_card %s: %s", f, e)
+
+    def _write_history_to_influx(self, f: str, decoded: dict, t_recv_ns: int):
+        module_name = self.device.yang_model_name.split('@')[0].replace(".sid", "")
+
+        # Parse type and id from f e.g. "[type='air-temperature'][id='0']"
+        m_type = re.search(r"type='([^']+)'", f)
+        m_id   = re.search(r"id='([^']+)'", f)
+        if not m_type:
+            log.warning("_write_history_to_influx: cannot parse type from f=%s", f)
+            return
+        sensor_type = m_type.group(1).split(':')[-1]  # strip module prefix
+        sensor_id   = m_id.group(1) if m_id else "0"
+
+        # Get precision for this transducer
+        db_xpath = f"{module_name}:transducers/transducer"
+        data = self.device.db[db_xpath + f] if self.device.db else None
+        precision = data.get('precision', 0) if data else 0
+        factor = 10 ** precision
+
+        # Structure: {"coreconf-m2m:history": {"time-series": [{..., "values": [...]}]}}
+        history = decoded.get(f"{module_name}:history", {})
+        ts_list = history.get("time-series", [])
+        ts = ts_list[0] if ts_list else None
+        if ts is None:
+            log.warning("_write_history_to_influx: no time-series found in decoded: %s", decoded)
+            return
+
+        raw_values = ts.get('values', [])
+        if not raw_values:
+            return
+
+        # Decode delta encoding: first value absolute, rest are deltas
+        decoded_values = []
+        acc = 0
+        for i, v in enumerate(raw_values):
+            acc = v if i == 0 else acc + v
+            decoded_values.append(acc)
+
+        # Reconstruct timestamps: last sample = t_recv, others step ms earlier
+        step_ms = self.device.history_step_ms
+        n = len(decoded_values)
+        points = []
+        for i, raw_val in enumerate(decoded_values):
+            t_ns = t_recv_ns - (n - 1 - i) * step_ms * 1_000_000
+            points.append(
+                Point(sensor_type)
+                    .tag("id", sensor_id)
+                    .field("value", raw_val / factor)
+                    .time(t_ns)
+            )
+
+        try:
+            self.influx.write(record=points)
+            log.info("influx: wrote %d points for %s id=%s", n, sensor_type, sensor_id)
+        except Exception as e:
+            log.error("influx write error: %s", e)
 
     def _update_card_stats(self, f: str):
         if not self.device.db:
