@@ -11,4 +11,4 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-pycoreconf = { git = "https://github.com/ltn22/pycoreconf.git", rev = "findSID" }
+pycoreconf = { git = "https://github.com/ltn22/pycoreconf.git", rev = "create_xpath" }
