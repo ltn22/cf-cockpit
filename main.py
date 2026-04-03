@@ -154,7 +154,7 @@ class RemoteDevice:
     async def fetch_statistics(self, f: str) -> bool:
         module_name = self.yang_model_name.split('@')[0].replace(".sid", "")
         db_xpath = f"{module_name}:transducers/transducer"
-        xpath = f"/{db_xpath}{f}/statistics"
+        xpath = f"/{db_xpath}{f}/quantity/statistics"
 
         try:
             target_sid, key_values = self.db._resolve_path(xpath)
@@ -185,7 +185,7 @@ class RemoteDevice:
 
             data = json.loads(self.model.toJSON(response.payload))
 
-            self.db[db_xpath + f] = {'statistics': data[db_xpath + "/statistics"]}
+            self.db[db_xpath + f] = {'quantity': {'statistics': data[db_xpath + "/quantity/statistics"]}}
         except Exception as e:
             log.error("fetch_statistics failed: %s", e)
             return False
@@ -879,7 +879,7 @@ class CockpitDashboardApp:
             data = self.device.db[measurement_path]
             precision = data.get('precision', 0)
             unit = data.get('unit', '')
-            stats = data.get('statistics', {})
+            stats = data.get('quantity', {}).get('statistics', {})
             if f in self.cards:
                 self.cards[f].update_stats(stats, precision, unit)
         except KeyError:

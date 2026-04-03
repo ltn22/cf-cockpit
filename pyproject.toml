@@ -6,15 +6,10 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "aiocoap>=0.4.17",
-    "cbor2>=5.6.5",
+    "cbor2>=5.8.0",
     "influxdb3-python>=0.18.0",
-    "matplotlib>=3.10.8",
     "pycoreconf",
 ]
-
-[project.scripts]
-cockpit-cli = "cli:main"
-cockpit     = "main:main"
 
 [tool.uv.sources]
 pycoreconf = { git = "https://github.com/ltn22/pycoreconf.git", rev = "create_xpath" }
