@@ -2,3 +2,6 @@
 __pycache__/
 *.pyc
 .python-version
+.venv/
+uv.lock
+.DS_Store
