@@ -93,7 +93,7 @@ class RemoteDevice:
         db_xpath = f"{module_name}:transducers/transducer"
 
         try:
-            filters = self.db.get_keys(db_xpath)
+            filters = self.db.predicates(db_xpath)
         except Exception as e:
             log.error("get_keys failed: %s", e)
             return False
@@ -942,7 +942,7 @@ class CockpitDashboardApp:
         db_xpath = f"{module_name}:transducers/transducer"
 
         try:
-            filters = self.device.db.get_keys(db_xpath)
+            filters = self.device.db.predicates(db_xpath)
             log.debug("update_ui: %d filter(s): %s", len(filters), filters)
         except Exception as e:
             log.error("update_ui get_keys failed: %s", e)
@@ -993,7 +993,7 @@ def main():
     parser = argparse.ArgumentParser(description="Cockpit2 GUI Dashboard")
     parser.add_argument("--host", type=str, default="[::1]", help="CoAP Server Host (default: [::1])")
     parser.add_argument("--port", type=int, default=None, help="CoAP Server Port")
-    parser.add_argument("--model", type=str, default="coreconf-m2m@2026-03-22", help="YANG Model Name")
+    parser.add_argument("--model", type=str, default="coreconf-m2m@2026-03-29", help="YANG Model Name")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose network logging")
     args = parser.parse_args()
 
