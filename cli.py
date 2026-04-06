@@ -39,7 +39,7 @@ class CockpitCLI:
         return f"coap://{self.host}{port_str}/{path}"
 
     def _coap_request(self, uri: str, payload: bytes) -> aiocoap.Message:
-        req = aiocoap.Message(code=aiocoap.FETCH, uri=uri, payload=payload)
+        req = aiocoap.Message(mtype=aiocoap.NON, code=aiocoap.FETCH, uri=uri, payload=payload)
         req.opt.content_format = 142
         req.opt.accept = 142
         return req
@@ -112,7 +112,7 @@ class CockpitCLI:
 
         req = self._coap_request(self._uri("c"), cbor.dumps(instance_id))
         resp = await asyncio.wait_for(self.protocol.request(req).response, timeout=5.0)
-        decoded = json.loads(self.model.toJSON(resp.payload))
+        decoded = self.model.toJSON(resp.payload, return_pydict=True)
         raw = next(iter(decoded.values()), None)
         if isinstance(raw, str):
             raw = int(raw)
@@ -148,7 +148,7 @@ class CockpitCLI:
 
         req = self._coap_request(self._uri("c"), cbor.dumps(instance_id))
         resp = await asyncio.wait_for(self.protocol.request(req).response, timeout=5.0)
-        data = json.loads(self.model.toJSON(resp.payload))
+        data = self.model.toJSON(resp.payload, return_pydict=True)
         stats = next(iter(data.values()), {})
 
         self.ds[db_xpath + f] = {'quantity': {'statistics': stats}}
@@ -171,7 +171,7 @@ class CockpitCLI:
         print(f"    n:       {stats.get('sample-count', '---')}")
         print()
 
-    async def cmd_follow(self, idx: int, step_ms: int = 5000, max_samples: int = 1):
+    async def cmd_follow(self, idx: int, step_ms: int = 5000, max_samples: int = 10):
         if not self._check_idx(idx):
             return
 
@@ -193,6 +193,7 @@ class CockpitCLI:
         )})
 
         patch_req = aiocoap.Message(
+            mtype=aiocoap.NON,
             code=aiocoap.numbers.codes.Code(7),  # iPATCH
             uri=self._uri("c"),
             payload=ipatch_payload,
@@ -209,7 +210,7 @@ class CockpitCLI:
         target_sid_ts, key_values_ts = self.ds._resolve_path(xpath_ts)
         instance_id = [target_sid_ts] + key_values_ts
 
-        obs_req = aiocoap.Message(code=aiocoap.FETCH, uri=self._uri("s"),
+        obs_req = aiocoap.Message(mtype=aiocoap.NON, code=aiocoap.FETCH, uri=self._uri("s"),
                                   payload=cbor.dumps(instance_id))
         obs_req.opt.content_format = 142
         obs_req.opt.accept = 142
