@@ -39,7 +39,8 @@ class CockpitCLI:
         return f"coap://{self.host}{port_str}/{path}"
 
     def _coap_request(self, uri: str, payload: bytes) -> aiocoap.Message:
-        req = aiocoap.Message(mtype=aiocoap.NON, code=aiocoap.FETCH, uri=uri, payload=payload)
+        req = aiocoap.Message(transport_tuning=aiocoap.Unreliable, code=aiocoap.FETCH, uri=uri, payload=payload)
+        req.opt.uri_host = None
         req.opt.content_format = 142
         req.opt.accept = 142
         return req
@@ -193,11 +194,12 @@ class CockpitCLI:
         )})
 
         patch_req = aiocoap.Message(
-            mtype=aiocoap.NON,
+            transport_tuning=aiocoap.Unreliable,
             code=aiocoap.numbers.codes.Code(7),  # iPATCH
             uri=self._uri("c"),
             payload=ipatch_payload,
         )
+        patch_req.opt.uri_host = None
         patch_req.opt.content_format = 142
 
         resp = await asyncio.wait_for(self.protocol.request(patch_req).response, timeout=5.0)
@@ -210,8 +212,9 @@ class CockpitCLI:
         target_sid_ts, key_values_ts = self.ds._resolve_path(xpath_ts)
         instance_id = [target_sid_ts] + key_values_ts
 
-        obs_req = aiocoap.Message(mtype=aiocoap.NON, code=aiocoap.FETCH, uri=self._uri("s"),
+        obs_req = aiocoap.Message(transport_tuning=aiocoap.Unreliable, code=aiocoap.FETCH, uri=self._uri("s"),
                                   payload=cbor.dumps(instance_id))
+        obs_req.opt.uri_host = None
         obs_req.opt.content_format = 142
         obs_req.opt.accept = 142
         obs_req.opt.observe = 0
