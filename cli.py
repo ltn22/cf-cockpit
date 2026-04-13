@@ -34,15 +34,21 @@ class CockpitCLI:
         base = os.path.basename(self.yang_model_name)
         return base.split('@')[0].replace('.sid', '')
 
-    def _uri(self, path: str) -> str:
+    def _remote(self) -> str:
         port_str = f":{self.port}" if self.port else ""
-        return f"coap://{self.host}{port_str}/{path}"
+        return f"{self.host}{port_str}"
 
-    def _coap_request(self, uri: str, payload: bytes) -> aiocoap.Message:
-        req = aiocoap.Message(transport_tuning=aiocoap.Unreliable, code=aiocoap.FETCH, uri=uri, payload=payload)
-        req.opt.uri_host = None
+    def _coap_request(self, path: str, payload: bytes) -> aiocoap.Message:
+        req = aiocoap.Message(transport_tuning=aiocoap.Unreliable, code=aiocoap.FETCH, payload=payload)
+        if '?' in path:
+            p, q = path.split('?', 1)
+            req.opt.uri_path = (p,)
+            req.opt.uri_query = tuple(q.split('&'))
+        else:
+            req.opt.uri_path = (path,)
         req.opt.content_format = 142
         req.opt.accept = 142
+        req.unresolved_remote = self._remote()
         return req
 
     async def init(self):
@@ -57,7 +63,7 @@ class CockpitCLI:
         xpath = f"/{module_name}:transducers/transducer"
         sid = self.model.sids[xpath]
 
-        req = self._coap_request(self._uri("c?d=0"), cbor.dumps(sid))
+        req = self._coap_request("c?d=0", cbor.dumps(sid))
         resp = await asyncio.wait_for(self.protocol.request(req).response, timeout=5.0)
  
         self.ds = self.model.create_datastore(resp.payload)
@@ -111,7 +117,7 @@ class CockpitCLI:
         target_sid, key_values = self.ds._resolve_path(xpath)
         instance_id = [target_sid] + key_values
 
-        req = self._coap_request(self._uri("c"), cbor.dumps(instance_id))
+        req = self._coap_request("c", cbor.dumps(instance_id))
         resp = await asyncio.wait_for(self.protocol.request(req).response, timeout=5.0)
         decoded = self.model.toJSON(resp.payload, return_pydict=True)
         raw = next(iter(decoded.values()), None)
@@ -147,7 +153,7 @@ class CockpitCLI:
         target_sid, key_values = self.ds._resolve_path(xpath)
         instance_id = [target_sid] + key_values
 
-        req = self._coap_request(self._uri("c"), cbor.dumps(instance_id))
+        req = self._coap_request("c", cbor.dumps(instance_id))
         resp = await asyncio.wait_for(self.protocol.request(req).response, timeout=5.0)
         data = self.model.toJSON(resp.payload, return_pydict=True)
         stats = next(iter(data.values()), {})
@@ -196,11 +202,11 @@ class CockpitCLI:
         patch_req = aiocoap.Message(
             transport_tuning=aiocoap.Unreliable,
             code=aiocoap.numbers.codes.Code(7),  # iPATCH
-            uri=self._uri("c"),
             payload=ipatch_payload,
         )
-        patch_req.opt.uri_host = None
+        patch_req.opt.uri_path = ('c',)
         patch_req.opt.content_format = 142
+        patch_req.unresolved_remote = self._remote()
 
         resp = await asyncio.wait_for(self.protocol.request(patch_req).response, timeout=5.0)
         if not resp.code.is_successful():
@@ -212,12 +218,13 @@ class CockpitCLI:
         target_sid_ts, key_values_ts = self.ds._resolve_path(xpath_ts)
         instance_id = [target_sid_ts] + key_values_ts
 
-        obs_req = aiocoap.Message(transport_tuning=aiocoap.Unreliable, code=aiocoap.FETCH, uri=self._uri("s"),
+        obs_req = aiocoap.Message(transport_tuning=aiocoap.Unreliable, code=aiocoap.FETCH,
                                   payload=cbor.dumps(instance_id))
-        obs_req.opt.uri_host = None
+        obs_req.opt.uri_path = ('s',)
         obs_req.opt.content_format = 142
         obs_req.opt.accept = 142
         obs_req.opt.observe = 0
+        obs_req.unresolved_remote = self._remote()
 
         obs = self.protocol.request(obs_req)
         first = await asyncio.wait_for(obs.response, timeout=5.0)
