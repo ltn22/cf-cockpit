@@ -46,7 +46,7 @@ class CockpitCLI:
             req.opt.uri_query = tuple(q.split('&'))
         else:
             req.opt.uri_path = (path,)
-        req.opt.content_format = 142
+        req.opt.content_format = 141
         req.opt.accept = 142
         req.unresolved_remote = self._remote()
         return req
@@ -221,7 +221,7 @@ class CockpitCLI:
         obs_req = aiocoap.Message(transport_tuning=aiocoap.Unreliable, code=aiocoap.FETCH,
                                   payload=cbor.dumps(instance_id))
         obs_req.opt.uri_path = ('s',)
-        obs_req.opt.content_format = 142
+        obs_req.opt.content_format = 141
         obs_req.opt.accept = 142
         obs_req.opt.observe = 0
         obs_req.unresolved_remote = self._remote()

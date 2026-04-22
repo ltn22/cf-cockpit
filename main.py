@@ -68,7 +68,7 @@ class RemoteDevice:
         port_str = f":{self.server_port}" if self.server_port else ""
         uri = f"coap://{self.server_host}{port_str}/c?d=0"
 
-        log.info("FETCH %s  (SID=%s, content-format=142)", uri, measurements_sid)
+        log.info("FETCH %s  (SID=%s, content-format=141)", uri, measurements_sid)
         payload = cbor.dumps(measurements_sid)
         log.debug("FETCH payload (CBOR hex): %s (%d bytes)", payload.hex(), len(payload))
 
@@ -77,7 +77,7 @@ class RemoteDevice:
             uri=uri,
             payload=payload
         )
-        request.opt.content_format = 142
+        request.opt.content_format = 141
         request.opt.accept = 142
 
         try:
@@ -128,7 +128,7 @@ class RemoteDevice:
             uri=uri,
             payload=payload
         )
-        request.opt.content_format = 142
+        request.opt.content_format = 141
         request.opt.accept = 142
 
         try:
@@ -175,7 +175,7 @@ class RemoteDevice:
             uri=uri,
             payload=payload
         )
-        request.opt.content_format = 142
+        request.opt.content_format = 141
         request.opt.accept = 142
 
         try:
@@ -302,7 +302,7 @@ class RemoteDevice:
         log.info("observe_history FETCH+Observe %s  instance=%s", uri_s, instance_id)
 
         request_s = aiocoap.Message(code=aiocoap.FETCH, uri=uri_s, payload=payload_s)
-        request_s.opt.content_format = 142
+        request_s.opt.content_format = 141
         request_s.opt.accept = 142
         request_s.opt.observe = 0
 
@@ -369,7 +369,7 @@ class RemoteDevice:
         log.info("FETCH+Observe %s  (instance=%s)", uri, instance_id)
 
         request = aiocoap.Message(code=aiocoap.FETCH, uri=uri, payload=payload)
-        request.opt.content_format = 142
+        request.opt.content_format = 141
         request.opt.accept = 142
         request.opt.observe = 0
 
