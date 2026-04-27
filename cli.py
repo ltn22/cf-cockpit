@@ -335,7 +335,6 @@ class CockpitCLI:
                         print(f"  Capteur {n} déjà observé.")
                     else:
                         self._follow_tasks[n] = asyncio.ensure_future(self.cmd_follow(n))
-                        print(f"  Observation capteur {n} lancée en arrière-plan.")
                 except ValueError:
                     print(f"  Argument invalide: {parts[1]}")
                 except Exception as e:
