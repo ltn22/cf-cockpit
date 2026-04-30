@@ -242,23 +242,30 @@ class CockpitCLI:
         print(f"  [{idx}] Observation {m_type} démarrée")
 
         def _print_values(payload):
-            new_ds = self.model.create_datastore(payload)
-            xpath_values = f"/{module_name}:history/time-series{f}/values"
-            values = new_ds[xpath_values]
-            ts = time.strftime('%H:%M:%S')
-            if isinstance(values, list):
-                for v in values:
-                    print(f"  [{idx}] {m_type}: {v / factor} {unit}  ({ts})")
-            elif values is not None:
-                print(f"  [{idx}] {m_type}: {values / factor} {unit}  ({ts})")
+            try:
+                new_ds = self.model.create_datastore(payload)
+                xpath_values = f"/{module_name}:history/time-series{f}/values"
+                values = new_ds[xpath_values]
+                ts = time.strftime('%H:%M:%S')
+                if isinstance(values, list):
+                    for v in values:
+                        print(f"  [{idx}] {m_type}: {v / factor} {unit}  ({ts})")
+                elif values is not None:
+                    print(f"  [{idx}] {m_type}: {values / factor} {unit}  ({ts})")
+                else:
+                    print(f"  [{idx}] notification reçue mais values=None (xpath: {xpath_values})")
+            except Exception as e:
+                print(f"  [{idx}] erreur décodage notification: {e}")
 
         _print_values(first.payload)
 
         try:
             async for resp in obs.observation:
                 _print_values(resp.payload)
-        except (KeyboardInterrupt, asyncio.CancelledError):
+        except asyncio.CancelledError:
             pass
+        except Exception as e:
+            print(f"  [{idx}] erreur observation: {e}")
         finally:
             obs.observation.cancel()
             print("  Observation arrêtée.")
