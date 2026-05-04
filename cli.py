@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Cockpit CLI — interface ligne de commande pour le monitoring de capteurs."""
 
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 
 import asyncio
 import argparse
@@ -185,102 +185,103 @@ class CockpitCLI:
             return
 
         log = logging.getLogger(f"follow[{idx}]")
-
-        f = self.filters[idx - 1]
-        module_name = self._module_name()
-        db_xpath = f"{module_name}:transducers/transducer"
-
-        # 1. iPATCH — activate history notification on the sensor
-        xpath_hist = f"/{db_xpath}{f}/notification-parameters/history"
-        target_sid, key_values = self.ds._resolve_path(xpath_hist)
-        ipatch_key = [target_sid] + key_values
-
-        qualified_payload = {db_xpath + '/notification-parameters/history': {
-            'step': step_ms, 'max-samples': max_samples,
-            'encoding': 'delta',
-        }}
-        ipatch_payload = cbor.dumps({tuple(ipatch_key): cbor.loads(
-            self.model.toCORECONF(json.dumps(qualified_payload))
-        )})
-
-        patch_req = aiocoap.Message(
-            transport_tuning=aiocoap.Unreliable,
-            code=aiocoap.numbers.codes.Code(7),  # iPATCH
-            payload=ipatch_payload,
-        )
-        patch_req.opt.uri_path = ('c',)
-        patch_req.opt.content_format = 142
-        patch_req.unresolved_remote = self._remote()
-
-        resp = await asyncio.wait_for(self.protocol.request(patch_req).response, timeout=5.0)
-        if not resp.code.is_successful():
-            print(f"  Erreur iPATCH: {resp.code}")
-            return
-
-        # 2. FETCH+Observe on /s for history/time-series
-        xpath_ts = f"/{module_name}:history/time-series{f}"
-        log.debug("résolution xpath_ts: %s", xpath_ts)
-        target_sid_ts, key_values_ts = self.ds._resolve_path(xpath_ts)
-        instance_id = [target_sid_ts] + key_values_ts
-
-        obs_req = aiocoap.Message(transport_tuning=aiocoap.Unreliable, code=aiocoap.FETCH,
-                                  payload=cbor.dumps(instance_id))
-        obs_req.opt.uri_path = ('s',)
-        obs_req.opt.content_format = 141
-        obs_req.opt.accept = 142
-        obs_req.opt.observe = 0
-        obs_req.unresolved_remote = self._remote()
-
-        obs = self.protocol.request(obs_req, handle_blockwise=False)
-        first = await asyncio.wait_for(obs.response, timeout=5.0)
-        if not first.code.is_successful():
-            print(f"  Erreur Observe: {first.code}")
-            obs.observation.cancel()
-            return
-
-        data = self.ds[db_xpath + f]
-        m_type = data.get('type', '?').split(':')[-1]
-        precision = data.get('precision', 0)
-        unit = data.get('unit', '')
-        factor = 10 ** precision
-
-        print(f"  [{idx}] Observation {m_type} démarrée")
-
-        def _print_values(payload):
-            log.debug("notification reçue: %d octets payload=%s", len(payload), payload.hex())
-            try:
-                new_ds = self.model.create_datastore(payload)
-                xpath_values = f"/{module_name}:history/time-series{f}/values"
-                log.debug("lecture xpath: %s", xpath_values)
-                values = new_ds[xpath_values]
-                log.debug("values brutes: %r", values)
-                ts = time.strftime('%H:%M:%S')
-                if isinstance(values, list):
-                    for v in values:
-                        print(f"  [{idx}] {m_type}: {v / factor} {unit}  ({ts})")
-                elif values is not None:
-                    print(f"  [{idx}] {m_type}: {values / factor} {unit}  ({ts})")
-                else:
-                    print(f"  [{idx}] notification reçue mais values=None (xpath: {xpath_values})")
-            except Exception as e:
-                log.debug("traceback complet:", exc_info=True)
-                print(f"  [{idx}] erreur décodage notification: {e}")
-
-        log.debug("première réponse observe: code=%s, %d octets", first.code, len(first.payload))
-        _print_values(first.payload)
+        obs = None
 
         try:
+            f = self.filters[idx - 1]
+            module_name = self._module_name()
+            db_xpath = f"{module_name}:transducers/transducer"
+
+            # 1. iPATCH — activate history notification on the sensor
+            xpath_hist = f"/{db_xpath}{f}/notification-parameters/history"
+            target_sid, key_values = self.ds._resolve_path(xpath_hist)
+            ipatch_key = [target_sid] + key_values
+
+            qualified_payload = {db_xpath + '/notification-parameters/history': {
+                'step': step_ms, 'max-samples': max_samples,
+                'encoding': 'delta',
+            }}
+            ipatch_payload = cbor.dumps({tuple(ipatch_key): cbor.loads(
+                self.model.toCORECONF(json.dumps(qualified_payload))
+            )})
+
+            patch_req = aiocoap.Message(
+                transport_tuning=aiocoap.Unreliable,
+                code=aiocoap.numbers.codes.Code(7),  # iPATCH
+                payload=ipatch_payload,
+            )
+            patch_req.opt.uri_path = ('c',)
+            patch_req.opt.content_format = 142
+            patch_req.unresolved_remote = self._remote()
+
+            resp = await asyncio.wait_for(self.protocol.request(patch_req).response, timeout=5.0)
+            if not resp.code.is_successful():
+                print(f"  Erreur iPATCH: {resp.code}")
+                return
+
+            # 2. FETCH+Observe on /s for history/time-series
+            xpath_ts = f"/{module_name}:history/time-series{f}"
+            log.debug("résolution xpath_ts: %s", xpath_ts)
+            target_sid_ts, key_values_ts = self.ds._resolve_path(xpath_ts)
+            instance_id = [target_sid_ts] + key_values_ts
+
+            obs_req = aiocoap.Message(transport_tuning=aiocoap.Unreliable, code=aiocoap.FETCH,
+                                      payload=cbor.dumps(instance_id))
+            obs_req.opt.uri_path = ('s',)
+            obs_req.opt.content_format = 141
+            obs_req.opt.accept = 142
+            obs_req.opt.observe = 0
+            obs_req.unresolved_remote = self._remote()
+
+            obs = self.protocol.request(obs_req, handle_blockwise=False)
+            first = await asyncio.wait_for(obs.response, timeout=5.0)
+            if not first.code.is_successful():
+                print(f"  Erreur Observe: {first.code}")
+                return
+
+            data = self.ds[db_xpath + f]
+            m_type = data.get('type', '?').split(':')[-1]
+            precision = data.get('precision', 0)
+            unit = data.get('unit', '')
+            factor = 10 ** precision
+
+            print(f"  [{idx}] Observation {m_type} démarrée")
+
+            def _print_values(payload):
+                log.debug("notification reçue: %d octets payload=%s", len(payload), payload.hex())
+                try:
+                    new_ds = self.model.create_datastore(payload)
+                    xpath_values = f"/{module_name}:history/time-series{f}/values"
+                    values = new_ds[xpath_values]
+                    log.debug("values brutes: %r", values)
+                    ts = time.strftime('%H:%M:%S')
+                    if isinstance(values, list):
+                        for v in values:
+                            print(f"  [{idx}] {m_type}: {v / factor} {unit}  ({ts})")
+                    elif values is not None:
+                        print(f"  [{idx}] {m_type}: {values / factor} {unit}  ({ts})")
+                    else:
+                        print(f"  [{idx}] notification reçue mais values=None (xpath: {xpath_values})")
+                except Exception as e:
+                    log.debug("erreur décodage:", exc_info=True)
+                    print(f"  [{idx}] erreur décodage notification: {e}")
+
+            log.debug("première réponse observe: code=%s, %d octets", first.code, len(first.payload))
+            _print_values(first.payload)
+
             async for resp in obs.observation:
                 log.debug("notification observe: code=%s, %d octets", resp.code, len(resp.payload))
                 _print_values(resp.payload)
+
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            log.debug("exception dans la boucle observe:", exc_info=True)
-            print(f"  [{idx}] erreur observation: {e}")
+            log.debug("erreur cmd_follow:", exc_info=True)
+            print(f"  [{idx}] erreur: {e}")
         finally:
-            obs.observation.cancel()
-            print("  Observation arrêtée.")
+            if obs is not None:
+                obs.observation.cancel()
+            print(f"  [{idx}] Observation arrêtée.")
 
     # ------------------------------------------------------------------ #
     # REPL                                                                 #
