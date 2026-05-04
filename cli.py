@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Cockpit CLI — interface ligne de commande pour le monitoring de capteurs."""
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 import asyncio
 import argparse
@@ -228,7 +228,7 @@ class CockpitCLI:
         obs_req.opt.observe = 0
         obs_req.unresolved_remote = self._remote()
 
-        obs = self.protocol.request(obs_req)
+        obs = self.protocol.request(obs_req, handle_blockwise=False)
         first = await asyncio.wait_for(obs.response, timeout=5.0)
         if not first.code.is_successful():
             print(f"  Erreur Observe: {first.code}")
