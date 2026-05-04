@@ -192,7 +192,7 @@ class CockpitCLI:
         ipatch_key = [target_sid] + key_values
 
         qualified_payload = {db_xpath + '/notification-parameters/history': {
-            'active': True, 'step': step_ms, 'max-samples': max_samples,
+            'step': step_ms, 'max-samples': max_samples,
             'encoding': 'delta',
         }}
         ipatch_payload = cbor.dumps({tuple(ipatch_key): cbor.loads(
