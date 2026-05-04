@@ -241,11 +241,16 @@ class CockpitCLI:
 
         print(f"  [{idx}] Observation {m_type} démarrée")
 
+        log = logging.getLogger(f"follow[{idx}]")
+
         def _print_values(payload):
+            log.debug("notification reçue: %d octets payload=%s", len(payload), payload.hex())
             try:
                 new_ds = self.model.create_datastore(payload)
                 xpath_values = f"/{module_name}:history/time-series{f}/values"
+                log.debug("lecture xpath: %s", xpath_values)
                 values = new_ds[xpath_values]
+                log.debug("values brutes: %r", values)
                 ts = time.strftime('%H:%M:%S')
                 if isinstance(values, list):
                     for v in values:
@@ -255,16 +260,20 @@ class CockpitCLI:
                 else:
                     print(f"  [{idx}] notification reçue mais values=None (xpath: {xpath_values})")
             except Exception as e:
+                log.debug("traceback complet:", exc_info=True)
                 print(f"  [{idx}] erreur décodage notification: {e}")
 
+        log.debug("première réponse observe: code=%s, %d octets", first.code, len(first.payload))
         _print_values(first.payload)
 
         try:
             async for resp in obs.observation:
+                log.debug("notification observe: code=%s, %d octets", resp.code, len(resp.payload))
                 _print_values(resp.payload)
         except asyncio.CancelledError:
             pass
         except Exception as e:
+            log.debug("exception dans la boucle observe:", exc_info=True)
             print(f"  [{idx}] erreur observation: {e}")
         finally:
             obs.observation.cancel()
@@ -382,7 +391,9 @@ def main():
     parser.add_argument("-v", "--verbose", action="store_true",      help="Logs détaillés")
     args = parser.parse_args()
 
-    if not args.verbose:
+    if args.verbose:
+        logging.basicConfig(level=logging.DEBUG, format="%(levelname)s %(name)s: %(message)s")
+    else:
         logging.disable(logging.CRITICAL)
 
     cli = CockpitCLI(args.host, args.port, args.model)
