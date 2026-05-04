@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Cockpit CLI — interface ligne de commande pour le monitoring de capteurs."""
 
+__version__ = "1.1.0"
+
 import asyncio
 import argparse
 import json
@@ -395,6 +397,9 @@ def main():
         logging.basicConfig(level=logging.DEBUG, format="%(levelname)s %(name)s: %(message)s")
     else:
         logging.disable(logging.CRITICAL)
+
+    import aiocoap.meta
+    print(f"cli v{__version__}  aiocoap v{aiocoap.meta.version}")
 
     cli = CockpitCLI(args.host, args.port, args.model)
     asyncio.run(cli.run())
