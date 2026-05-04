@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Cockpit CLI — interface ligne de commande pour le monitoring de capteurs."""
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 import asyncio
 import argparse
@@ -184,6 +184,8 @@ class CockpitCLI:
         if not self._check_idx(idx):
             return
 
+        log = logging.getLogger(f"follow[{idx}]")
+
         f = self.filters[idx - 1]
         module_name = self._module_name()
         db_xpath = f"{module_name}:transducers/transducer"
@@ -217,6 +219,7 @@ class CockpitCLI:
 
         # 2. FETCH+Observe on /s for history/time-series
         xpath_ts = f"/{module_name}:history/time-series{f}"
+        log.debug("résolution xpath_ts: %s", xpath_ts)
         target_sid_ts, key_values_ts = self.ds._resolve_path(xpath_ts)
         instance_id = [target_sid_ts] + key_values_ts
 
@@ -242,8 +245,6 @@ class CockpitCLI:
         factor = 10 ** precision
 
         print(f"  [{idx}] Observation {m_type} démarrée")
-
-        log = logging.getLogger(f"follow[{idx}]")
 
         def _print_values(payload):
             log.debug("notification reçue: %d octets payload=%s", len(payload), payload.hex())
@@ -352,7 +353,12 @@ class CockpitCLI:
                     if n in self._follow_tasks and not self._follow_tasks[n].done():
                         print(f"  Capteur {n} déjà observé.")
                     else:
-                        self._follow_tasks[n] = asyncio.ensure_future(self.cmd_follow(n))
+                        task = asyncio.ensure_future(self.cmd_follow(n))
+                        def _on_done(t, _idx=n):
+                            if not t.cancelled() and t.exception():
+                                print(f"  [{_idx}] erreur tâche: {t.exception()!r}")
+                        task.add_done_callback(_on_done)
+                        self._follow_tasks[n] = task
                 except ValueError:
                     print(f"  Argument invalide: {parts[1]}")
                 except Exception as e:
