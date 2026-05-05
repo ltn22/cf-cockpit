@@ -247,10 +247,12 @@ class CockpitCLI:
 
             print(f"  [{idx}] Observation {m_type} démarrée")
 
+            encoding = 'delta'  # matches the iPATCH payload above
+
             def _print_values(payload):
                 log.debug("notification reçue: %d octets payload=%s", len(payload), payload.hex())
-                # The server embeds CoAP option bytes (Observe + Content-Format)
-                # followed by 0xFF before the actual CBOR payload.
+                # Strip CoAP framing bytes (Observe + Content-Format options + 0xFF marker)
+                # that may precede the actual CBOR payload in some aiocoap versions.
                 ff = payload.find(b'\xff')
                 if ff >= 0:
                     payload = payload[ff + 1:]
@@ -258,21 +260,27 @@ class CockpitCLI:
                     new_ds = self.model.create_datastore(payload)
                     xpath_values = f"/{module_name}:history/time-series{f}/values"
                     values = new_ds[xpath_values]
+                    if not values:
+                        return
                     log.debug("values brutes: %r", values)
+                    if encoding == 'delta' and isinstance(values, list):
+                        decoded, acc = [], 0
+                        for v in values:
+                            acc += v
+                            decoded.append(acc)
+                        values = decoded
                     ts = time.strftime('%H:%M:%S')
                     if isinstance(values, list):
                         for v in values:
                             print(f"  [{idx}] {m_type}: {v / factor} {unit}  ({ts})")
                     elif values is not None:
                         print(f"  [{idx}] {m_type}: {values / factor} {unit}  ({ts})")
-                    else:
-                        print(f"  [{idx}] notification reçue mais values=None (xpath: {xpath_values})")
                 except Exception as e:
                     log.debug("erreur décodage:", exc_info=True)
                     print(f"  [{idx}] erreur décodage notification: {e}")
 
             log.debug("première réponse observe: code=%s, %d octets", first.code, len(first.payload))
-            _print_values(first.payload)
+            _print_values(first.payload)  # empty first response is silently skipped
 
             async for resp in obs.observation:
                 log.debug("notification observe: code=%s, %d octets", resp.code, len(resp.payload))
