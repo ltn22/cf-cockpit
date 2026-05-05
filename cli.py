@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Cockpit CLI — interface ligne de commande pour le monitoring de capteurs."""
 
-__version__ = "1.4.0"
+__version__ = "1.5.0"
 
 import asyncio
 import argparse
@@ -249,6 +249,11 @@ class CockpitCLI:
 
             def _print_values(payload):
                 log.debug("notification reçue: %d octets payload=%s", len(payload), payload.hex())
+                # The server embeds CoAP option bytes (Observe + Content-Format)
+                # followed by 0xFF before the actual CBOR payload.
+                ff = payload.find(b'\xff')
+                if ff >= 0:
+                    payload = payload[ff + 1:]
                 try:
                     new_ds = self.model.create_datastore(payload)
                     xpath_values = f"/{module_name}:history/time-series{f}/values"
@@ -279,8 +284,11 @@ class CockpitCLI:
             log.debug("erreur cmd_follow:", exc_info=True)
             print(f"  [{idx}] erreur: {e}")
         finally:
-            if obs is not None:
-                obs.observation.cancel()
+            if obs is not None and obs.observation is not None:
+                try:
+                    obs.observation.cancel()
+                except Exception:
+                    pass
             print(f"  [{idx}] Observation arrêtée.")
 
     # ------------------------------------------------------------------ #
