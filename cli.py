@@ -180,7 +180,7 @@ class CockpitCLI:
         print(f"    n:       {stats.get('sample-count', '---')}")
         print()
 
-    async def cmd_follow(self, idx: int, step_ms: int = 5000, max_samples: int = 10):
+    async def cmd_follow(self, idx: int, step_ms: int = 5000, max_samples: int = 3):
         if not self._check_idx(idx):
             return
 
