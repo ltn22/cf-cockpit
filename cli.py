@@ -187,15 +187,12 @@ class CockpitCLI:
     async def _send_rst(self, token: bytes) -> None:
         """Envoie un RST CoAP pour annuler une observation côté serveur."""
         try:
-            rst = aiocoap.Message(mtype=aiocoap.RST, code=aiocoap.EMPTY, token=token)
+            # _mtype/_token : paramètres internes non dépréciés (aiocoap >= 0.4.x)
+            rst = aiocoap.Message(_mtype=aiocoap.RST, code=aiocoap.EMPTY, _token=token)
             rst.unresolved_remote = self._remote()
-            pool = getattr(self.protocol, '_pool', None)
-            if pool is not None and hasattr(pool, 'send_message'):
-                await pool.send_message(rst)
-            elif hasattr(self.protocol, 'send_message'):
-                await self.protocol.send_message(rst)
-            else:
-                logging.getLogger('cli').warning("RST: aucune API d'envoi brut disponible dans aiocoap")
+            # find_remote_and_interface résout rst.remote en place et retourne le TokenManager
+            interface = await self.protocol.find_remote_and_interface(rst)
+            interface.token_interface.send_message(rst, None)
         except Exception as e:
             logging.getLogger('cli').debug("Erreur envoi RST: %s", e)
 
