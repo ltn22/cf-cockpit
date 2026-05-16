@@ -21,10 +21,11 @@ def _no_data(precision: int) -> str:
 
 
 class CockpitCLI:
-    def __init__(self, host: str, port: int | None, yang_model_name: str):
+    def __init__(self, host: str, port: int | None, yang_model_name: str, timeout: float = 10.0):
         self.host = host
         self.port = port
         self.yang_model_name = yang_model_name
+        self.timeout = timeout
         self.model = None
         self.ds = None
         self.protocol = None
@@ -69,7 +70,7 @@ class CockpitCLI:
         sid = self.model.sids[xpath]
 
         req = self._coap_request("c?d=0", cbor.dumps(sid))
-        resp = await asyncio.wait_for(self.protocol.request(req).response, timeout=5.0)
+        resp = await asyncio.wait_for(self.protocol.request(req).response, timeout=self.timeout)
  
         self.ds = self.model.create_datastore(resp.payload)
         db_xpath = f"{module_name}:transducers/transducer"
@@ -123,7 +124,7 @@ class CockpitCLI:
         instance_id = [target_sid] + key_values
 
         req = self._coap_request("c", cbor.dumps(instance_id))
-        resp = await asyncio.wait_for(self.protocol.request(req).response, timeout=5.0)
+        resp = await asyncio.wait_for(self.protocol.request(req).response, timeout=self.timeout)
         decoded = self.model.toJSON(resp.payload, return_pydict=True)
         raw = next(iter(decoded.values()), None)
         if isinstance(raw, str):
@@ -159,7 +160,7 @@ class CockpitCLI:
         instance_id = [target_sid] + key_values
 
         req = self._coap_request("c", cbor.dumps(instance_id))
-        resp = await asyncio.wait_for(self.protocol.request(req).response, timeout=5.0)
+        resp = await asyncio.wait_for(self.protocol.request(req).response, timeout=self.timeout)
         data = self.model.toJSON(resp.payload, return_pydict=True)
         stats = next(iter(data.values()), {})
 
@@ -253,7 +254,7 @@ class CockpitCLI:
             patch_req.opt.content_format = 142
             patch_req.unresolved_remote = self._remote()
 
-            resp = await asyncio.wait_for(self.protocol.request(patch_req).response, timeout=5.0)
+            resp = await asyncio.wait_for(self.protocol.request(patch_req).response, timeout=self.timeout)
             if not resp.code.is_successful():
                 print(f"  Erreur iPATCH: {resp.code}")
                 return
@@ -273,7 +274,7 @@ class CockpitCLI:
             obs_req.unresolved_remote = self._remote()
 
             obs = self.protocol.request(obs_req, handle_blockwise=False)
-            first = await asyncio.wait_for(obs.response, timeout=5.0)
+            first = await asyncio.wait_for(obs.response, timeout=self.timeout)
             self._follow_obs[idx] = (obs, first.token)  # token garanti valide ici
             if not first.code.is_successful():
                 print(f"  Erreur Observe: {first.code}")
@@ -459,8 +460,9 @@ def main():
     parser = argparse.ArgumentParser(description="Cockpit CLI — monitoring de capteurs IoT")
     parser.add_argument("--host",  default="[::1]",                  help="Hôte CoAP (défaut: [::1])")
     parser.add_argument("--port",  type=int, default=None,           help="Port CoAP")
-    parser.add_argument("--model", default="coreconf-m2m@2026-03-29", help="Nom du modèle YANG")
-    parser.add_argument("-v", "--verbose", action="store_true",      help="Logs détaillés")
+    parser.add_argument("--model",   default="coreconf-m2m@2026-03-29", help="Nom du modèle YANG")
+    parser.add_argument("--timeout", type=float, default=10.0,          help="Timeout CoAP en secondes (défaut: 10)")
+    parser.add_argument("-v", "--verbose", action="store_true",         help="Logs détaillés")
     args = parser.parse_args()
 
     if args.verbose:
@@ -471,7 +473,7 @@ def main():
     import aiocoap.meta
     print(f"cli v{__version__}  aiocoap v{aiocoap.meta.version}")
 
-    cli = CockpitCLI(args.host, args.port, args.model)
+    cli = CockpitCLI(args.host, args.port, args.model, timeout=args.timeout)
     asyncio.run(cli.run())
 
 
