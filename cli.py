@@ -31,8 +31,6 @@ class CockpitCLI:
         self.protocol = None
         self.filters = []  # liste ordonnée des filtres de capteurs
         self._follow_tasks = {}  # idx -> asyncio.Task
-        self._follow_obs = {}    # idx -> (obs, token)  pour envoi RST
-        self._follow_stop_set = set()  # indices stoppés via cmd_stop (RST déjà envoyé)
 
 
     def _module_name(self) -> str:
@@ -184,41 +182,14 @@ class CockpitCLI:
         print(f"    n:       {stats.get('sample-count', '---')}")
         print()
 
-    async def _send_rst(self, token: bytes, remote) -> None:
-        """Envoie un RST CoAP pour annuler une observation côté serveur."""
-        try:
-            rst = aiocoap.Message(_mtype=aiocoap.RST, code=aiocoap.EMPTY, _token=token)
-            # Affecter le remote déjà résolu évite le passage par determine_remote()
-            # qui échoue sur les messages non-request (EMPTY code).
-            rst.remote = remote
-            for ri in self.protocol.request_interfaces:
-                if await ri.fill_or_recognize_remote(rst):
-                    ri.token_interface.send_message(rst, None)
-                    return
-            logging.getLogger('cli').debug("RST: aucune interface reconnue pour ce remote")
-        except Exception as e:
-            logging.getLogger('cli').debug("Erreur envoi RST: %s", e)
-
     async def cmd_stop(self, idx: int):
-        """Arrête l'observation du capteur idx en envoyant un RST CoAP."""
-        obs_info = self._follow_obs.get(idx)
-        task = self._follow_tasks.get(idx)
-
-        if obs_info is None and (task is None or task.done()):
+        """Arrête l'observation : annule localement, aiocoap envoie RST à la prochaine notification."""
+        task = self._follow_tasks.pop(idx, None)
+        if task is None or task.done():
             print(f"  Capteur {idx} non observé.")
             return
-
-        self._follow_stop_set.add(idx)
-
-        if obs_info is not None:
-            _, token, remote = obs_info
-            await self._send_rst(token, remote)
-
-        task = self._follow_tasks.pop(idx, None)
-        if task and not task.done():
-            task.cancel()
-
-        print(f"  [{idx}] Observation arrêtée (RST).")
+        task.cancel()
+        print(f"  [{idx}] Observation arrêtée.")
 
     async def cmd_follow(self, idx: int, step_ms: int = 5000, max_samples: int = 3):
         if not self._check_idx(idx):
@@ -275,7 +246,6 @@ class CockpitCLI:
 
             obs = self.protocol.request(obs_req, handle_blockwise=False)
             first = await asyncio.wait_for(obs.response, timeout=self.timeout)
-            self._follow_obs[idx] = (obs, first.token, first.remote)  # remote déjà résolu
             if not first.code.is_successful():
                 print(f"  Erreur Observe: {first.code}")
                 return
@@ -333,16 +303,12 @@ class CockpitCLI:
             log.debug("erreur cmd_follow:", exc_info=True)
             print(f"  [{idx}] erreur: {e}")
         finally:
-            self._follow_obs.pop(idx, None)
-            if idx not in self._follow_stop_set:
-                # Arrêt non initié par cmd_stop : annulation locale sans RST
-                if obs is not None and obs.observation is not None:
-                    try:
-                        obs.observation.cancel()
-                    except Exception:
-                        pass
-                print(f"  [{idx}] Observation arrêtée.")
-            self._follow_stop_set.discard(idx)
+            if obs is not None and obs.observation is not None:
+                try:
+                    obs.observation.cancel()
+                except Exception:
+                    pass
+            print(f"  [{idx}] Observation arrêtée.")
 
     # ------------------------------------------------------------------ #
     # REPL                                                                 #
