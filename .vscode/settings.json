@@ -1,0 +1,16 @@
+{
+    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+    "python.terminal.activateEnvironment": true,
+    "workbench.colorCustomizations": {
+        "editor.background": "#1a0a2e",
+        "sideBar.background": "#150825",
+        "activityBar.background": "#150825",
+        "statusBar.background": "#2d1b4e",
+        "panel.background": "#1a0a2e",
+        "terminal.background": "#1a0a2e",
+        "tab.activeBackground": "#2d1b4e",
+        "tab.inactiveBackground": "#1a0a2e",
+        "editorGroupHeader.tabsBackground": "#150825",
+        "titleBar.activeBackground": "#150825"
+    }
+}
