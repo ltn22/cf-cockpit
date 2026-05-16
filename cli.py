@@ -303,9 +303,18 @@ class CockpitCLI:
             log.debug("erreur cmd_follow:", exc_info=True)
             print(f"  [{idx}] erreur: {e}")
         finally:
-            if obs is not None and obs.observation is not None:
+            if obs is not None:
+                # obs.observation.cancel() marque cancelled=True mais le générateur
+                # interne (_run) ne voit le flag qu'à la prochaine notification.
+                # _stop_interest() le force immédiatement : la prochaine notification
+                # arrivera sans handler enregistré et aiocoap enverra RST automatiquement.
+                if obs.observation is not None:
+                    try:
+                        obs.observation.cancel()
+                    except Exception:
+                        pass
                 try:
-                    obs.observation.cancel()
+                    obs._stop_interest()
                 except Exception:
                     pass
             print(f"  [{idx}] Observation arrêtée.")
