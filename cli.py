@@ -184,15 +184,18 @@ class CockpitCLI:
         print(f"    n:       {stats.get('sample-count', '---')}")
         print()
 
-    async def _send_rst(self, token: bytes) -> None:
+    async def _send_rst(self, token: bytes, remote) -> None:
         """Envoie un RST CoAP pour annuler une observation côté serveur."""
         try:
-            # _mtype/_token : paramètres internes non dépréciés (aiocoap >= 0.4.x)
             rst = aiocoap.Message(_mtype=aiocoap.RST, code=aiocoap.EMPTY, _token=token)
-            rst.unresolved_remote = self._remote()
-            # find_remote_and_interface résout rst.remote en place et retourne le TokenManager
-            interface = await self.protocol.find_remote_and_interface(rst)
-            interface.token_interface.send_message(rst, None)
+            # Affecter le remote déjà résolu évite le passage par determine_remote()
+            # qui échoue sur les messages non-request (EMPTY code).
+            rst.remote = remote
+            for ri in self.protocol.request_interfaces:
+                if await ri.fill_or_recognize_remote(rst):
+                    ri.token_interface.send_message(rst, None)
+                    return
+            logging.getLogger('cli').debug("RST: aucune interface reconnue pour ce remote")
         except Exception as e:
             logging.getLogger('cli').debug("Erreur envoi RST: %s", e)
 
@@ -208,8 +211,8 @@ class CockpitCLI:
         self._follow_stop_set.add(idx)
 
         if obs_info is not None:
-            _, token = obs_info
-            await self._send_rst(token)
+            _, token, remote = obs_info
+            await self._send_rst(token, remote)
 
         task = self._follow_tasks.pop(idx, None)
         if task and not task.done():
@@ -272,7 +275,7 @@ class CockpitCLI:
 
             obs = self.protocol.request(obs_req, handle_blockwise=False)
             first = await asyncio.wait_for(obs.response, timeout=self.timeout)
-            self._follow_obs[idx] = (obs, first.token)  # token garanti valide ici
+            self._follow_obs[idx] = (obs, first.token, first.remote)  # remote déjà résolu
             if not first.code.is_successful():
                 print(f"  Erreur Observe: {first.code}")
                 return
