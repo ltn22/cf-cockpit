@@ -11,6 +11,7 @@ import time
 import sys
 
 import aiocoap
+
 import cbor2 as cbor
 from pycoreconf import CORECONFModel
 
@@ -29,6 +30,8 @@ class CockpitCLI:
         self.protocol = None
         self.filters = []  # liste ordonnée des filtres de capteurs
         self._follow_tasks = {}  # idx -> asyncio.Task
+        self._follow_obs = {}    # idx -> (obs, token)  pour envoi RST
+        self._follow_stop_set = set()  # indices stoppés via cmd_stop (RST déjà envoyé)
 
 
     def _module_name(self) -> str:
@@ -180,6 +183,42 @@ class CockpitCLI:
         print(f"    n:       {stats.get('sample-count', '---')}")
         print()
 
+    async def _send_rst(self, token: bytes) -> None:
+        """Envoie un RST CoAP pour annuler une observation côté serveur."""
+        try:
+            rst = aiocoap.Message(mtype=aiocoap.RST, code=aiocoap.EMPTY, token=token)
+            rst.unresolved_remote = self._remote()
+            pool = getattr(self.protocol, '_pool', None)
+            if pool is not None and hasattr(pool, 'send_message'):
+                await pool.send_message(rst)
+            elif hasattr(self.protocol, 'send_message'):
+                await self.protocol.send_message(rst)
+            else:
+                logging.getLogger('cli').warning("RST: aucune API d'envoi brut disponible dans aiocoap")
+        except Exception as e:
+            logging.getLogger('cli').debug("Erreur envoi RST: %s", e)
+
+    async def cmd_stop(self, idx: int):
+        """Arrête l'observation du capteur idx en envoyant un RST CoAP."""
+        obs_info = self._follow_obs.get(idx)
+        task = self._follow_tasks.get(idx)
+
+        if obs_info is None and (task is None or task.done()):
+            print(f"  Capteur {idx} non observé.")
+            return
+
+        self._follow_stop_set.add(idx)
+
+        if obs_info is not None:
+            _, token = obs_info
+            await self._send_rst(token)
+
+        task = self._follow_tasks.pop(idx, None)
+        if task and not task.done():
+            task.cancel()
+
+        print(f"  [{idx}] Observation arrêtée (RST).")
+
     async def cmd_follow(self, idx: int, step_ms: int = 5000, max_samples: int = 3):
         if not self._check_idx(idx):
             return
@@ -235,6 +274,7 @@ class CockpitCLI:
 
             obs = self.protocol.request(obs_req, handle_blockwise=False)
             first = await asyncio.wait_for(obs.response, timeout=5.0)
+            self._follow_obs[idx] = (obs, first.token)  # token garanti valide ici
             if not first.code.is_successful():
                 print(f"  Erreur Observe: {first.code}")
                 return
@@ -292,12 +332,16 @@ class CockpitCLI:
             log.debug("erreur cmd_follow:", exc_info=True)
             print(f"  [{idx}] erreur: {e}")
         finally:
-            if obs is not None and obs.observation is not None:
-                try:
-                    obs.observation.cancel()
-                except Exception:
-                    pass
-            print(f"  [{idx}] Observation arrêtée.")
+            self._follow_obs.pop(idx, None)
+            if idx not in self._follow_stop_set:
+                # Arrêt non initié par cmd_stop : annulation locale sans RST
+                if obs is not None and obs.observation is not None:
+                    try:
+                        obs.observation.cancel()
+                    except Exception:
+                        pass
+                print(f"  [{idx}] Observation arrêtée.")
+            self._follow_stop_set.discard(idx)
 
     # ------------------------------------------------------------------ #
     # REPL                                                                 #
@@ -316,7 +360,7 @@ class CockpitCLI:
 
         print(f"Connecté. {len(self.filters)} capteur(s) découvert(s).")
         self.cmd_list()
-        print("Commandes: list, refresh N, stat N, follow N, quit  (ou: l, r N, s N, f N, q)")
+        print("Commandes: list, refresh N, stat N, follow N, stop N, quit  (ou: l, r N, s N, f N, q)")
 
         loop = asyncio.get_event_loop()
         while True:
@@ -361,6 +405,15 @@ class CockpitCLI:
                 except Exception as e:
                     print(f"  Erreur: {e}")
 
+            elif cmd == 'stop':
+                if len(parts) < 2:
+                    print("  Usage: stop N")
+                    continue
+                try:
+                    await self.cmd_stop(int(parts[1]))
+                except ValueError:
+                    print(f"  Argument invalide: {parts[1]}")
+
             elif cmd in ('follow', 'f'):
                 if len(parts) < 2:
                     print("  Usage: follow N")
@@ -386,22 +439,16 @@ class CockpitCLI:
                     print("  Usage: unfollow N")
                     continue
                 try:
-                    n = int(parts[1])
-                    task = self._follow_tasks.pop(n, None)
-                    if task and not task.done():
-                        task.cancel()
-                        print(f"  Observation capteur {n} arrêtée.")
-                    else:
-                        print(f"  Capteur {n} non observé.")
+                    await self.cmd_stop(int(parts[1]))
                 except ValueError:
                     print(f"  Argument invalide: {parts[1]}")
 
             elif cmd == 'help':
                 print("  list / l              — lister les capteurs")
                 print("  refresh N / r N       — lire la valeur du capteur N")
-                print("  stat N / s N          — statistiques du capteur N")
+                print("  stat N                — statistiques du capteur N")
                 print("  follow N / f N        — observer le capteur N en arriere-plan")
-                print("  unfollow N / uf N     — arreter l'observation du capteur N")
+                print("  stop N / uf N         — arreter l'observation (envoie RST)")
                 print("  quit / q              — quitter")
 
             else:
