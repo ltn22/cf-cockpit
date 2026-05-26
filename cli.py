@@ -211,6 +211,7 @@ class CockpitCLI:
             qualified_payload = {db_xpath + '/notification-parameters/history': {
                 'step': step_ms, 'max-samples': max_samples,
                 'encoding': 'delta',
+                'check-interval': 2,
             }}
             ipatch_payload = cbor.dumps({tuple(ipatch_key): cbor.loads(
                 self.model.toCORECONF(json.dumps(qualified_payload))
