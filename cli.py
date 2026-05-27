@@ -191,7 +191,7 @@ class CockpitCLI:
         task.cancel()
         print(f"  [{idx}] Observation arrêtée.")
 
-    async def cmd_follow(self, idx: int, step_ms: int = 5000, max_samples: int = 3):
+    async def cmd_follow(self, idx: int, step_ms: int = 5000, max_samples: int = 3, check_interval: int = 2):
         if not self._check_idx(idx):
             return
 
@@ -211,7 +211,7 @@ class CockpitCLI:
             qualified_payload = {db_xpath + '/notification-parameters/history': {
                 'step': step_ms, 'max-samples': max_samples,
                 'encoding': 'delta',
-                'check-interval': 2,
+                'check-interval': check_interval,
             }}
             ipatch_payload = cbor.dumps({tuple(ipatch_key): cbor.loads(
                 self.model.toCORECONF(json.dumps(qualified_payload))
@@ -281,11 +281,15 @@ class CockpitCLI:
                             acc += v
                             decoded.append(acc)
                         values = decoded
-                    ts = time.strftime('%H:%M:%S')
+                    now = time.time()
                     if isinstance(values, list):
-                        for v in values:
+                        n = len(values)
+                        for i, v in enumerate(values):
+                            t = now - (n - 1 - i) * step_ms / 1000
+                            ts = time.strftime('%H:%M:%S', time.localtime(t))
                             print(f"  [{idx}] {m_type}: {v / factor} {unit}  ({ts})")
                     elif values is not None:
+                        ts = time.strftime('%H:%M:%S')
                         print(f"  [{idx}] {m_type}: {values / factor} {unit}  ({ts})")
                 except Exception as e:
                     log.debug("erreur décodage:", exc_info=True)
@@ -337,7 +341,7 @@ class CockpitCLI:
 
         print(f"Connecté. {len(self.filters)} capteur(s) découvert(s).")
         self.cmd_list()
-        print("Commandes: list, refresh N, stat N, follow N, stop N, quit  (ou: l, r N, s N, f N, q)")
+        print("Commandes: list, refresh N, stat N, follow N [nb step ci], stop N, quit  (ou: l, r N, s N, f N, q)")
 
         loop = asyncio.get_event_loop()
         while True:
@@ -393,14 +397,17 @@ class CockpitCLI:
 
             elif cmd in ('follow', 'f'):
                 if len(parts) < 2:
-                    print("  Usage: follow N")
+                    print("  Usage: follow N [nb_samples [step_ms [check_interval]]]")
                     continue
                 try:
-                    n = int(parts[1])
+                    n           = int(parts[1])
+                    max_samples = int(parts[2]) if len(parts) > 2 else 3
+                    step_ms     = int(parts[3]) if len(parts) > 3 else 5000
+                    chk         = int(parts[4]) if len(parts) > 4 else 2
                     if n in self._follow_tasks and not self._follow_tasks[n].done():
                         print(f"  Capteur {n} déjà observé.")
                     else:
-                        task = asyncio.ensure_future(self.cmd_follow(n))
+                        task = asyncio.ensure_future(self.cmd_follow(n, step_ms, max_samples, chk))
                         def _on_done(t, _idx=n):
                             if not t.cancelled() and t.exception():
                                 print(f"  [{_idx}] erreur tâche: {t.exception()!r}")
@@ -424,7 +431,7 @@ class CockpitCLI:
                 print("  list / l              — lister les capteurs")
                 print("  refresh N / r N       — lire la valeur du capteur N")
                 print("  stat N                — statistiques du capteur N")
-                print("  follow N / f N        — observer le capteur N en arriere-plan")
+                print("  follow N [nb step ci] — observer capteur N (nb_samples, step_ms, check_interval)")
                 print("  stop N / uf N         — arreter l'observation (envoie RST)")
                 print("  quit / q              — quitter")
 
