@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-class MainScreenViewModel : ViewModel() {
+class MainScreenViewModel(application: android.app.Application) : androidx.lifecycle.AndroidViewModel(application) {
     private val _sessions = MutableStateFlow<List<ServerSession>>(listOf(ServerSession()))
     val sessions: StateFlow<List<ServerSession>> = _sessions.asStateFlow()
 
@@ -235,6 +235,7 @@ class MainScreenViewModel : ViewModel() {
 
             currentTransducers[index] = targetTransducer.copy(isObserving = false)
             updateSession(sessionId) { it.copy(transducers = currentTransducers) }
+            com.example.cockpit.network.CoapObserveService.stopMonitoring(getApplication())
             android.util.Log.i("MainScreenViewModel", "Cancelled observation for key: $obsKey")
         } else {
             // Start observation by first running iPATCH in a coroutine, then establishing subscription
@@ -295,6 +296,7 @@ class MainScreenViewModel : ViewModel() {
                     )
                     activeObservations[obsKey] = relation
                     activeClients[obsKey] = client
+                    com.example.cockpit.network.CoapObserveService.startMonitoring(getApplication(), session.host)
                     android.util.Log.i("MainScreenViewModel", "Successfully started observation for key: $obsKey")
                 } catch (e: Exception) {
                     e.printStackTrace()
@@ -325,6 +327,7 @@ class MainScreenViewModel : ViewModel() {
                     val id = parts[2].toLongOrNull() ?: 0L
                     val transducer = session.transducers.find { it.id == id && it.typeSid == typeSid }
                     if (transducer != null) {
+                        com.example.cockpit.network.CoapObserveService.stopMonitoring(getApplication())
                         viewModelScope.launch {
                             try {
                                 CoapService.cancelObserveTimeSeries(session.host, session.port, transducer, token)
