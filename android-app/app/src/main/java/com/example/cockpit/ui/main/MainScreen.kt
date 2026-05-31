@@ -45,6 +45,8 @@ import androidx.navigation3.runtime.NavKey
 import com.example.cockpit.model.ConnectionState
 import com.example.cockpit.model.ServerSession
 import com.example.cockpit.model.Transducer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectDragGestures
 
 // Premium harmonious dark palette colors
 val DeepBackground = Color(0xFF0F0F1A)
@@ -869,6 +871,22 @@ fun TimeSeriesGraphDialog(
     onDismiss: () -> Unit,
     onShowValues: () -> Unit
 ) {
+    val points = transducer.timeSeries
+    val totalCount = points.size
+
+    // Configuration of visible points window
+    val visiblePointsCount = 25
+    val activeCount = minOf(visiblePointsCount, totalCount)
+
+    // State for scroll index (starting point of visible window)
+    var startIndex by remember(totalCount) {
+        mutableStateOf(maxOf(0, totalCount - activeCount))
+    }
+
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val paddingLeftPx = with(density) { 40.dp.toPx() }
+    val paddingRightPx = with(density) { 10.dp.toPx() }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
@@ -879,9 +897,8 @@ fun TimeSeriesGraphDialog(
                     fontWeight = FontWeight.Bold,
                     fontSize = 18.sp
                 )
-                val pointCount = transducer.timeSeries.size
                 Text(
-                    text = "Observe Active ⏳ | N: $pointCount ${if (pointCount == 1) "point" else "points"}",
+                    text = "Observe Active ⏳ | N: $totalCount ${if (totalCount == 1) "point" else "points"}",
                     color = AccentCyan,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold
@@ -892,11 +909,11 @@ fun TimeSeriesGraphDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(280.dp),
+                    .height(310.dp), // Increased to accommodate double graph comfortably
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                if (transducer.timeSeries.isEmpty()) {
+                if (points.isEmpty()) {
                     CircularProgressIndicator(color = AccentCyan, modifier = Modifier.size(36.dp))
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
@@ -906,29 +923,71 @@ fun TimeSeriesGraphDialog(
                         textAlign = TextAlign.Center
                     )
                 } else {
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(5.dp))
+
+                    // 1. FOCUS GRAPH (Large, detailed, zoom/scroll view)
+                    Text(
+                        text = "Scroll horizontal with finger 👈 👉",
+                        color = TextSecondary,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Normal,
+                        modifier = Modifier.padding(bottom = 2.dp)
+                    )
+
+                    val visiblePoints = remember(points, startIndex, activeCount) {
+                        if (startIndex + activeCount <= points.size) {
+                            points.subList(startIndex, startIndex + activeCount)
+                        } else {
+                            points.takeLast(activeCount)
+                        }
+                    }
+
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .weight(1f)
+                            .height(170.dp)
                             .border(1.dp, BorderColor, RoundedCornerShape(8.dp))
                             .background(DeepBackground.copy(alpha = 0.5f))
                             .padding(8.dp)
                     ) {
                         val textMeasurer = rememberTextMeasurer()
-                        androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
-                            val points = transducer.timeSeries
-                            if (points.isNotEmpty()) {
-                                val minTimeRaw = points.first().timestamp
-                                val maxTimeRaw = points.last().timestamp
+                        var dragAccumulator by remember { mutableStateOf(0f) }
+
+                        androidx.compose.foundation.Canvas(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .pointerInput(points.size, activeCount) {
+                                    detectDragGestures(
+                                        onDragStart = { dragAccumulator = 0f },
+                                        onDrag = { change, dragAmount ->
+                                            change.consume()
+                                            dragAccumulator += dragAmount.x
+                                            val chartWidth = size.width.toFloat() - paddingLeftPx - paddingRightPx
+                                            val pointWidth = chartWidth / maxOf(1, activeCount - 1).toFloat()
+                                            if (Math.abs(dragAccumulator) >= pointWidth) {
+                                                val shift = (dragAccumulator / pointWidth).toInt()
+                                                var newIndex = startIndex - shift
+                                                newIndex = newIndex.coerceIn(0, maxOf(0, points.size - activeCount))
+                                                if (newIndex != startIndex) {
+                                                    startIndex = newIndex
+                                                    dragAccumulator -= shift * pointWidth
+                                                }
+                                            }
+                                        }
+                                    )
+                                }
+                        ) {
+                            if (visiblePoints.isNotEmpty()) {
+                                val minTimeRaw = visiblePoints.first().timestamp
+                                val maxTimeRaw = visiblePoints.last().timestamp
                                 val (minTime, maxTime, timeRange) = if (maxTimeRaw > minTimeRaw) {
                                     Triple(minTimeRaw, maxTimeRaw, (maxTimeRaw - minTimeRaw).toFloat())
                                 } else {
                                     Triple(minTimeRaw - 30000L, minTimeRaw + 30000L, 60000f)
                                 }
 
-                                val minValRaw = points.minOf { it.value }.toFloat()
-                                val maxValRaw = points.maxOf { it.value }.toFloat()
+                                val minValRaw = visiblePoints.minOf { it.value }.toFloat()
+                                val maxValRaw = visiblePoints.maxOf { it.value }.toFloat()
                                 val (minVal, maxVal, valRange) = if (maxValRaw > minValRaw) {
                                     Triple(minValRaw, maxValRaw, maxValRaw - minValRaw)
                                 } else {
@@ -948,8 +1007,7 @@ fun TimeSeriesGraphDialog(
                                 for (i in 0 until gridLineCount) {
                                     val ratio = i.toFloat() / (gridLineCount - 1)
                                     val y = chartTop + chartHeight * (1f - ratio)
-                                    
-                                    // Grid line
+
                                     drawLine(
                                         color = BorderColor.copy(alpha = 0.3f),
                                         start = Offset(chartLeft, y),
@@ -957,7 +1015,6 @@ fun TimeSeriesGraphDialog(
                                         strokeWidth = 1.dp.toPx()
                                     )
 
-                                    // Y Label
                                     val labelVal = minVal + ratio * valRange
                                     val labelText = String.format("%.${transducer.precision}f", labelVal)
                                     drawText(
@@ -978,8 +1035,7 @@ fun TimeSeriesGraphDialog(
                                 for (i in 0 until gridColCount) {
                                     val ratio = i.toFloat() / (gridColCount - 1)
                                     val x = chartLeft + chartWidth * ratio
-                                    
-                                    // Grid line
+
                                     drawLine(
                                         color = BorderColor.copy(alpha = 0.3f),
                                         start = Offset(x, chartTop),
@@ -987,7 +1043,6 @@ fun TimeSeriesGraphDialog(
                                         strokeWidth = 1.dp.toPx()
                                     )
 
-                                    // X Label
                                     val labelTime = minTime + (ratio * timeRange).toLong()
                                     val labelText = sdf.format(java.util.Date(labelTime))
                                     val textLayoutResult = textMeasurer.measure(
@@ -1006,12 +1061,12 @@ fun TimeSeriesGraphDialog(
                                     )
                                 }
 
-                                // Draw chart path
-                                if (points.size >= 2) {
+                                // Draw Focus chart path
+                                if (visiblePoints.size >= 2) {
                                     val path = Path()
                                     val fillPath = Path()
 
-                                    points.forEachIndexed { idx, point ->
+                                    visiblePoints.forEachIndexed { idx, point ->
                                         val ratioX = if (timeRange > 0) (point.timestamp - minTime).toFloat() / timeRange else 0f
                                         val ratioY = if (valRange > 0) (point.value.toFloat() - minVal) / valRange else 0.5f
 
@@ -1026,7 +1081,7 @@ fun TimeSeriesGraphDialog(
                                             path.lineTo(x, y)
                                             fillPath.lineTo(x, y)
                                         }
-                                        if (idx == points.lastIndex) {
+                                        if (idx == visiblePoints.lastIndex) {
                                             fillPath.lineTo(x, chartTop + chartHeight)
                                             fillPath.close()
                                         }
@@ -1048,8 +1103,8 @@ fun TimeSeriesGraphDialog(
                                     )
                                 }
 
-                                // Draw circles on points
-                                points.forEach { point ->
+                                // Draw circles on Focus points (ronds indicateurs)
+                                visiblePoints.forEach { point ->
                                     val ratioX = if (timeRange > 0) (point.timestamp - minTime).toFloat() / timeRange else 0f
                                     val ratioY = if (valRange > 0) (point.value.toFloat() - minVal) / valRange else 0.5f
 
@@ -1058,12 +1113,12 @@ fun TimeSeriesGraphDialog(
 
                                     drawCircle(
                                         color = AccentCyan,
-                                        radius = 3.dp.toPx(),
+                                        radius = 3.5.dp.toPx(),
                                         center = Offset(x, y)
                                     )
                                     drawCircle(
                                         color = AccentPurple.copy(alpha = 0.6f),
-                                        radius = 5.dp.toPx(),
+                                        radius = 5.5.dp.toPx(),
                                         center = Offset(x, y),
                                         style = Stroke(width = 1.dp.toPx())
                                     )
@@ -1072,24 +1127,100 @@ fun TimeSeriesGraphDialog(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
-                    
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // 2. CONTEXT/OVERVIEW GRAPH (Small navigation bar showing complete session)
+                    Text(
+                        text = "Global Session Overview",
+                        color = TextSecondary,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.align(Alignment.Start).padding(start = 2.dp)
+                    )
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(45.dp)
+                            .border(1.dp, BorderColor.copy(alpha = 0.6f), RoundedCornerShape(4.dp))
+                            .background(DeepBackground.copy(alpha = 0.3f))
+                    ) {
+                        androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+                            if (points.size >= 2) {
+                                val minTimeGlobal = points.first().timestamp
+                                val maxTimeGlobal = points.last().timestamp
+                                val timeRangeGlobal = (maxTimeGlobal - minTimeGlobal).toFloat()
+
+                                val minValGlobal = points.minOf { it.value }.toFloat()
+                                val maxValGlobal = points.maxOf { it.value }.toFloat()
+                                val valRangeGlobal = if (maxValGlobal > minValGlobal) maxValGlobal - minValGlobal else 1f
+
+                                val overviewWidth = size.width
+                                val overviewHeight = size.height
+
+                                // Draw complete thin global line
+                                val globalPath = Path()
+                                points.forEachIndexed { idx, point ->
+                                    val ratioX = if (timeRangeGlobal > 0) (point.timestamp - minTimeGlobal).toFloat() / timeRangeGlobal else 0f
+                                    val ratioY = (point.value.toFloat() - minValGlobal) / valRangeGlobal
+
+                                    val x = ratioX * overviewWidth
+                                    val y = 4.dp.toPx() + (overviewHeight - 8.dp.toPx()) * (1f - ratioY)
+
+                                    if (idx == 0) {
+                                        globalPath.moveTo(x, y)
+                                    } else {
+                                        globalPath.lineTo(x, y)
+                                    }
+                                }
+
+                                drawPath(
+                                    path = globalPath,
+                                    color = AccentCyan.copy(alpha = 0.5f),
+                                    style = Stroke(width = 1.dp.toPx())
+                                )
+
+                                // Draw translucent focus highlight rectangle (le "viseur")
+                                val startRatio = startIndex.toFloat() / points.size.toFloat()
+                                val endRatio = (startIndex + activeCount).toFloat() / points.size.toFloat()
+                                val rectLeft = startRatio * overviewWidth
+                                val rectWidth = (endRatio - startRatio) * overviewWidth
+
+                                drawRect(
+                                    color = AccentCyan.copy(alpha = 0.15f),
+                                    topLeft = Offset(rectLeft, 0f),
+                                    size = androidx.compose.ui.geometry.Size(rectWidth, overviewHeight)
+                                )
+                                drawRect(
+                                    color = AccentCyan.copy(alpha = 0.7f),
+                                    topLeft = Offset(rectLeft, 0f),
+                                    size = androidx.compose.ui.geometry.Size(rectWidth, overviewHeight),
+                                    style = Stroke(width = 1.dp.toPx())
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        val minV = transducer.timeSeries.minOf { it.value }
-                        val maxV = transducer.timeSeries.maxOf { it.value }
+                        val minV = points.minOf { it.value }
+                        val maxV = points.maxOf { it.value }
+                        val visibleMin = visiblePoints.minOfOrNull { it.value } ?: minV
+                        val visibleMax = visiblePoints.maxOfOrNull { it.value } ?: maxV
                         Text(
-                            text = String.format("Min: %.${transducer.precision}f %s", minV, transducer.unit),
+                            text = String.format("Visible Range: %.${transducer.precision}f - %.${transducer.precision}f %s", visibleMin, visibleMax, transducer.unit),
                             color = TextSecondary,
-                            fontSize = 12.sp,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Medium
                         )
                         Text(
-                            text = String.format("Max: %.${transducer.precision}f %s", maxV, transducer.unit),
+                            text = String.format("Session Max: %.${transducer.precision}f %s", maxV, transducer.unit),
                             color = AccentCyan,
-                            fontSize = 12.sp,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
