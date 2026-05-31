@@ -146,6 +146,7 @@ class MainScreenViewModel : ViewModel() {
     }
 
     private val activeObservations = mutableMapOf<String, org.eclipse.californium.core.CoapObserveRelation>()
+    private val activeClients = mutableMapOf<String, org.eclipse.californium.core.CoapClient>()
     private val activeTokens = mutableMapOf<String, ByteArray>()
 
     fun toggleStatsView(sessionId: String, transducer: Transducer) {
@@ -229,6 +230,8 @@ class MainScreenViewModel : ViewModel() {
                 activeTokens.remove(obsKey)
             }
             activeObservations.remove(obsKey)
+            activeClients[obsKey]?.shutdown()
+            activeClients.remove(obsKey)
 
             currentTransducers[index] = targetTransducer.copy(isObserving = false)
             updateSession(sessionId) { it.copy(transducers = currentTransducers) }
@@ -257,7 +260,7 @@ class MainScreenViewModel : ViewModel() {
                     java.util.Random().nextBytes(token)
                     activeTokens[obsKey] = token
 
-                    val relation = CoapService.observeTimeSeries(
+                    val (client, relation) = CoapService.observeTimeSeries(
                         host = session.host,
                         port = session.port,
                         transducer = targetTransducer,
@@ -288,6 +291,7 @@ class MainScreenViewModel : ViewModel() {
                         }
                     )
                     activeObservations[obsKey] = relation
+                    activeClients[obsKey] = client
                     android.util.Log.i("MainScreenViewModel", "Successfully started observation for key: $obsKey")
                 } catch (e: Exception) {
                     e.printStackTrace()

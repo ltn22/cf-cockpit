@@ -402,7 +402,7 @@ object CoapService {
         token: ByteArray,
         onUpdate: (List<com.example.cockpit.model.TimeSeriesPoint>) -> Unit,
         onError: (Throwable) -> Unit
-    ): CoapObserveRelation = withContext(Dispatchers.IO) {
+    ): Pair<CoapClient, CoapObserveRelation> = withContext(Dispatchers.IO) {
         val uri = getFormattedUri(host, port, "s")
         Log.i(TAG, "Subscribing to Time-Series Observation for sensor ${transducer.typeName} at: $uri")
 
@@ -422,7 +422,7 @@ object CoapService {
         val payloadArray = listOf(100044L, transducer.typeSid, transducer.id)
         request.payload = CborEncoder.encodeIntArray(payloadArray)
 
-        client.observe(request, object : CoapHandler {
+        val relation = client.observe(request, object : CoapHandler {
             override fun onLoad(response: CoapResponse?) {
                 if (response == null) return
                 if (!response.code.isSuccess) {
@@ -558,8 +558,6 @@ object CoapService {
                         }
                     }
 
-
-
                     onUpdate(readings)
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to parse observe notification CBOR", e)
@@ -571,6 +569,7 @@ object CoapService {
                 onError(Exception("Observe registration failed"))
             }
         })
+        Pair(client, relation)
     }
 
     suspend fun cancelObserveTimeSeries(
