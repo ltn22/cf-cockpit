@@ -400,6 +400,7 @@ object CoapService {
         port: Int?,
         transducer: Transducer,
         token: ByteArray,
+        step: Long,
         onUpdate: (List<com.example.cockpit.model.TimeSeriesPoint>) -> Unit,
         onError: (Throwable) -> Unit
     ): Pair<CoapClient, CoapObserveRelation> = withContext(Dispatchers.IO) {
@@ -453,8 +454,8 @@ object CoapService {
                                 when (item) {
                                     is Number -> {
                                         accumulator += item.toDouble()
-                                        // Space out backwards from now by 10s check-interval
-                                        val t = now - (size - 1 - i) * 10000L
+                                        // Space out backwards from now by actual step
+                                        val t = now - (size - 1 - i) * step
                                         readings.add(
                                             com.example.cockpit.model.TimeSeriesPoint(
                                                 timestamp = t,
@@ -507,8 +508,8 @@ object CoapService {
                                     val item = valuesList[i]
                                     if (item is Number) {
                                         accumulator += item.toDouble()
-                                        // Space out backwards from now by 10s check-interval
-                                        val t = now - (size - 1 - i) * 10000L
+                                        // Space out backwards from now by actual step
+                                        val t = now - (size - 1 - i) * step
                                         readings.add(
                                             com.example.cockpit.model.TimeSeriesPoint(
                                                 timestamp = t,

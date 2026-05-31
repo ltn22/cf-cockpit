@@ -265,13 +265,16 @@ class MainScreenViewModel : ViewModel() {
                         port = session.port,
                         transducer = targetTransducer,
                         token = token,
+                        step = step,
                         onUpdate = { newPoints ->
                             viewModelScope.launch {
                                 val activeSession = getSession(sessionId) ?: return@launch
                                 val updatedTransducers = activeSession.transducers.toMutableList()
                                 val idx = updatedTransducers.indexOfFirst { it.id == transducer.id && it.typeSid == transducer.typeSid }
                                 if (idx != -1) {
-                                    val mergedHistory = newPoints.takeLast(100)
+                                    val currentPoints = updatedTransducers[idx].timeSeries
+                                    val mergedMap = (currentPoints + newPoints).associateBy { it.timestamp }
+                                    val mergedHistory = mergedMap.values.sortedBy { it.timestamp }.takeLast(1000)
 
                                     updatedTransducers[idx] = updatedTransducers[idx].copy(timeSeries = mergedHistory)
                                     updateSession(sessionId) { it.copy(transducers = updatedTransducers) }
