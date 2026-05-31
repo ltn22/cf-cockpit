@@ -567,32 +567,7 @@ fun AddServerDialog(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.padding(top = 8.dp)
             ) {
-                // Display the resolved SID obtained via pycoreconf
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(DeepBackground)
-                        .border(1.dp, AccentCyan.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
-                        .padding(10.dp)
-                ) {
-                    Column {
-                        Text(
-                            text = "Resolved SID (via pycoreconf)",
-                            color = AccentCyan,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.sp
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "/coreconf-m2m:transducers/transducer -> $resolvedSid",
-                            color = TextPrimary,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                }
+
                 OutlinedTextField(
                     value = host,
                     onValueChange = { host = it },
