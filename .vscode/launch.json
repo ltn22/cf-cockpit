@@ -1,0 +1,23 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "cf-cockpit",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "args": ["--host", "xlapak.touta.in"],
+            "console": "integratedTerminal",
+            "justMyCode": false
+        }, 
+        {
+            "name": "cli",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/cli.py",
+            "args": ["--host", "[::1]"],
+            "console": "integratedTerminal",
+            "justMyCode": false
+        }
+    ]
+}

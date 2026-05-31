@@ -79,6 +79,7 @@ class RemoteDevice:
         )
         request.opt.content_format = 141
         request.opt.accept = 142
+        request.opt.uri_host = None
 
         try:
             response = await asyncio.wait_for(self.protocol.request(request).response, timeout=5.0)
@@ -130,6 +131,7 @@ class RemoteDevice:
         )
         request.opt.content_format = 141
         request.opt.accept = 142
+        request.opt.uri_host = None
 
         try:
             response = await asyncio.wait_for(self.protocol.request(request).response, timeout=5.0)
@@ -177,6 +179,7 @@ class RemoteDevice:
         )
         request.opt.content_format = 141
         request.opt.accept = 142
+        request.opt.uri_host = None
 
         try:
             response = await asyncio.wait_for(self.protocol.request(request).response, timeout=5.0)
@@ -235,6 +238,7 @@ class RemoteDevice:
             payload=ipatch_query
         )
         request.opt.content_format = 142
+        request.opt.uri_host = None
 
         try:
             response = await asyncio.wait_for(self.protocol.request(request).response, timeout=5.0)
@@ -277,6 +281,7 @@ class RemoteDevice:
             payload=ipatch_query
         )
         request.opt.content_format = 142
+        request.opt.uri_host = None
 
         try:
             response = await asyncio.wait_for(self.protocol.request(request).response, timeout=5.0)
@@ -305,6 +310,7 @@ class RemoteDevice:
         request_s.opt.content_format = 141
         request_s.opt.accept = 142
         request_s.opt.observe = 0
+        request_s.opt.uri_host = None
 
         obs_key = f"history{f}"
         if obs_key in self._observations:
@@ -372,6 +378,7 @@ class RemoteDevice:
         request.opt.content_format = 141
         request.opt.accept = 142
         request.opt.observe = 0
+        request.opt.uri_host = None
 
         obs_key = f"sensor-alert{f}"
         if obs_key in self._observations:
@@ -697,6 +704,13 @@ class CockpitDashboardApp:
     async def _async_init(self):
         try:
             await self.device.init_model()
+            module_name = self.device.yang_model_name.split('@')[0].replace(".sid", "")
+            xpath = f"/{module_name}:transducers/transducer"
+            sid_str = "Not found"
+            if self.device.model and xpath in self.device.model.sids:
+                sid_str = str(self.device.model.sids[xpath])
+            self.queue.put(('model_loaded', sid_str))
+            
             success = await self.device.bootstrap_db()
         except Exception as e:
             log.error("Init failed: %s", e)
@@ -764,6 +778,8 @@ class CockpitDashboardApp:
                 try:
                     if msg[0] == 'update' and msg[1]:
                         self.update_ui()
+                    elif msg[0] == 'model_loaded':
+                        self.sid_label.config(text=f"Bootstrap SID: {msg[1]}")
                     elif msg[0] == 'refresh' and msg[2]:
                         self._update_card(msg[1])
                     elif msg[0] == 'stats' and msg[2]:
@@ -897,6 +913,9 @@ class CockpitDashboardApp:
         header.pack(fill=tk.X)
         tk.Label(header, text="Cockpit2 Dashboard", font=('Arial', 14, 'bold'),
                  fg='white', bg='#2a2a3e').pack(side=tk.LEFT, padx=12)
+        self.sid_label = tk.Label(header, text="Bootstrap SID: Loading...", font=('Arial', 10, 'bold'),
+                                  fg='#00f0ff', bg='#2a2a3e')
+        self.sid_label.pack(side=tk.LEFT, padx=20)
         self.status_label = tk.Label(header, text="Connecting...", font=('Arial', 10),
                                       fg='#aaa', bg='#2a2a3e')
         self.status_label.pack(side=tk.RIGHT, padx=12)
