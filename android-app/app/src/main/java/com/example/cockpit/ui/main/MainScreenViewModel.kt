@@ -6,6 +6,8 @@ import com.example.cockpit.model.ConnectionState
 import com.example.cockpit.model.ServerSession
 import com.example.cockpit.model.Transducer
 import com.example.cockpit.network.CoapService
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -14,6 +16,45 @@ import kotlinx.coroutines.launch
 class MainScreenViewModel(application: android.app.Application) : androidx.lifecycle.AndroidViewModel(application) {
     private val _sessions = MutableStateFlow<List<ServerSession>>(listOf(ServerSession()))
     val sessions: StateFlow<List<ServerSession>> = _sessions.asStateFlow()
+
+    private data class ObsConfig(
+        val step: Long = 60000L,
+        val maxSamples: Long = 10L,
+        val encoding: Long = 1L,
+        val checkInterval: Long = 10L
+    )
+    private val activeObsConfigs = mutableMapOf<String, ObsConfig>()
+    private var currentIpv6Addresses = emptySet<String>()
+
+    init {
+        val connectivityManager = getApplication<android.app.Application>().getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+            try {
+                connectivityManager.registerDefaultNetworkCallback(object : android.net.ConnectivityManager.NetworkCallback() {
+                    override fun onLinkPropertiesChanged(network: android.net.Network, linkProperties: android.net.LinkProperties) {
+                        super.onLinkPropertiesChanged(network, linkProperties)
+                        
+                        val newIpv6s = linkProperties.linkAddresses
+                            .map { it.address }
+                            .filterIsInstance<java.net.Inet6Address>()
+                            .map { it.hostAddress }
+                            .filterNotNull()
+                            .toSet()
+
+                        if (newIpv6s.isNotEmpty()) {
+                            if (currentIpv6Addresses.isNotEmpty() && currentIpv6Addresses != newIpv6s) {
+                                android.util.Log.i("MainScreenViewModel", "IPv6 address change detected! Old: $currentIpv6Addresses, New: $newIpv6s. Re-subscribing active observations...")
+                                reSubscribeActiveObservations()
+                            }
+                            currentIpv6Addresses = newIpv6s
+                        }
+                    }
+                })
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
 
     private fun getSession(sessionId: String): ServerSession? {
         return _sessions.value.find { it.id == sessionId }
@@ -148,6 +189,7 @@ class MainScreenViewModel(application: android.app.Application) : androidx.lifec
     private val activeObservations = mutableMapOf<String, org.eclipse.californium.core.CoapObserveRelation>()
     private val activeClients = mutableMapOf<String, org.eclipse.californium.core.CoapClient>()
     private val activeTokens = mutableMapOf<String, ByteArray>()
+    private val statsAutohideJobs = mutableMapOf<String, Job>()
 
     fun toggleStatsView(sessionId: String, transducer: Transducer) {
         val session = getSession(sessionId) ?: return
@@ -157,12 +199,40 @@ class MainScreenViewModel(application: android.app.Application) : androidx.lifec
 
         val targetTransducer = currentTransducers[index]
         val nextShowStats = !targetTransducer.showStats
+
         currentTransducers[index] = targetTransducer.copy(showStats = nextShowStats)
         updateSession(sessionId) { it.copy(transducers = currentTransducers) }
 
         if (nextShowStats && targetTransducer.statistics == null) {
             fetchSensorStatistics(sessionId, targetTransducer)
+            
+            // Auto-hide and clear cached statistics after 1 minute (60 seconds)
+            val key = "${sessionId}_${transducer.typeSid}_${transducer.id}"
+            statsAutohideJobs[key]?.cancel()
+            
+            val job = viewModelScope.launch {
+                delay(60000L)
+                clearAndHideStatsView(sessionId, transducer)
+            }
+            statsAutohideJobs[key] = job
         }
+    }
+
+    private fun clearAndHideStatsView(sessionId: String, transducer: Transducer) {
+        val session = getSession(sessionId) ?: return
+        val currentTransducers = session.transducers.toMutableList()
+        val index = currentTransducers.indexOfFirst { it.id == transducer.id && it.typeSid == transducer.typeSid }
+        if (index == -1) return
+
+        val targetTransducer = currentTransducers[index]
+        currentTransducers[index] = targetTransducer.copy(
+            showStats = false,
+            statistics = null
+        )
+        updateSession(sessionId) { it.copy(transducers = currentTransducers) }
+
+        val key = "${sessionId}_${transducer.typeSid}_${transducer.id}"
+        statsAutohideJobs.remove(key)
     }
 
     fun fetchSensorStatistics(sessionId: String, transducer: Transducer) {
@@ -232,6 +302,7 @@ class MainScreenViewModel(application: android.app.Application) : androidx.lifec
             activeObservations.remove(obsKey)
             activeClients[obsKey]?.shutdown()
             activeClients.remove(obsKey)
+            activeObsConfigs.remove(obsKey)
 
             currentTransducers[index] = targetTransducer.copy(isObserving = false)
             updateSession(sessionId) { it.copy(transducers = currentTransducers) }
@@ -239,6 +310,8 @@ class MainScreenViewModel(application: android.app.Application) : androidx.lifec
             android.util.Log.i("MainScreenViewModel", "Cancelled observation for key: $obsKey")
         } else {
             // Start observation by first running iPATCH in a coroutine, then establishing subscription
+            val config = ObsConfig(step, maxSamples, encoding, checkInterval)
+            activeObsConfigs[obsKey] = config
             currentTransducers[index] = targetTransducer.copy(isObserving = true, timeSeries = emptyList())
             updateSession(sessionId) { it.copy(transducers = currentTransducers) }
 
@@ -307,6 +380,71 @@ class MainScreenViewModel(application: android.app.Application) : androidx.lifec
                     if (idx != -1) {
                         updatedTransducers[idx] = updatedTransducers[idx].copy(isObserving = false)
                         updateSession(sessionId) { it.copy(transducers = updatedTransducers) }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun reSubscribeActiveObservations() {
+        _sessions.value.forEach { session ->
+            session.transducers.forEach { transducer ->
+                val obsKey = "${session.id}-${transducer.typeSid}-${transducer.id}"
+                if (transducer.isObserving) {
+                    android.util.Log.i("MainScreenViewModel", "Re-subscribing sensor ${transducer.typeName} (key: $obsKey) due to IP change...")
+                    
+                    activeObservations.remove(obsKey)
+                    activeClients[obsKey]?.shutdown()
+                    activeClients.remove(obsKey)
+
+                    viewModelScope.launch {
+                        try {
+                            val token = ByteArray(2)
+                            java.util.Random().nextBytes(token)
+                            activeTokens[obsKey] = token
+
+                            val config = activeObsConfigs[obsKey] ?: ObsConfig()
+
+                            val (client, relation) = CoapService.observeTimeSeries(
+                                host = session.host,
+                                port = session.port,
+                                transducer = transducer,
+                                token = token,
+                                step = config.step,
+                                onUpdate = { newPoints ->
+                                    viewModelScope.launch {
+                                        val activeSession = getSession(session.id) ?: return@launch
+                                        val updatedTransducers = activeSession.transducers.toMutableList()
+                                        val idx = updatedTransducers.indexOfFirst { it.id == transducer.id && it.typeSid == transducer.typeSid }
+                                        if (idx != -1) {
+                                            val currentPoints = updatedTransducers[idx].timeSeries
+                                            val mergedMap = (currentPoints + newPoints).associateBy { it.timestamp }
+                                            val mergedHistory = mergedMap.values.sortedBy { it.timestamp }.takeLast(1000)
+
+                                            updatedTransducers[idx] = updatedTransducers[idx].copy(timeSeries = mergedHistory)
+                                            updateSession(session.id) { it.copy(transducers = updatedTransducers) }
+                                        }
+                                    }
+                                },
+                                onError = {
+                                    viewModelScope.launch {
+                                        val activeSession = getSession(session.id) ?: return@launch
+                                        val updatedTransducers = activeSession.transducers.toMutableList()
+                                        val idx = updatedTransducers.indexOfFirst { it.id == transducer.id && it.typeSid == transducer.typeSid }
+                                        if (idx != -1) {
+                                            updatedTransducers[idx] = updatedTransducers[idx].copy(isObserving = false)
+                                            updateSession(session.id) { it.copy(transducers = updatedTransducers) }
+                                        }
+                                    }
+                                }
+                            )
+                            activeObservations[obsKey] = relation
+                            activeClients[obsKey] = client
+                            android.util.Log.i("MainScreenViewModel", "Successfully re-subscribed sensor ${transducer.typeName} (key: $obsKey)")
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                            android.util.Log.w("MainScreenViewModel", "Failed to re-subscribe sensor ${transducer.typeName}: ${e.message}")
+                        }
                     }
                 }
             }

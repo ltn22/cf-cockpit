@@ -9,7 +9,7 @@ android {
     namespace = "com.example.cockpit"
     compileSdk = 36
     defaultConfig {
-        applicationId = "com.example.cockpit"
+        applicationId = "fr.schcchair.coreconf_m2m"
         minSdk = 24
         targetSdk = 36
         versionCode = 1

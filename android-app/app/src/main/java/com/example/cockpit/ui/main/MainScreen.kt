@@ -781,7 +781,12 @@ fun SensorCard(
                     val valueText = if (transducer.value != null) {
                         String.format("%.${transducer.precision}f", transducer.value)
                     } else {
-                        "---"
+                        when (transducer.precision) {
+                            1 -> "--.-"
+                            2 -> "-.--"
+                            3 -> ".---"
+                            else -> "---"
+                        }
                     }
                     Text(
                         text = "$valueText ${transducer.unit}",
