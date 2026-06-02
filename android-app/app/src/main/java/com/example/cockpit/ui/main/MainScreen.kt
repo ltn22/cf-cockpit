@@ -45,6 +45,7 @@ import androidx.navigation3.runtime.NavKey
 import com.example.cockpit.model.ConnectionState
 import com.example.cockpit.model.ServerSession
 import com.example.cockpit.model.Transducer
+import com.example.cockpit.model.TimeSeriesPoint
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectDragGestures
 
@@ -879,18 +880,89 @@ fun TimeSeriesGraphDialog(
     val points = transducer.timeSeries
     val totalCount = points.size
 
-    // Configuration of visible points window
-    val visiblePointsCount = 25
+    // Configuration of visible points window (Zoom State)
+    var visiblePointsCount by remember { mutableStateOf(50) }
     val activeCount = minOf(visiblePointsCount, totalCount)
 
     // State for scroll index (starting point of visible window)
-    var startIndex by remember(totalCount) {
+    var startIndex by remember(totalCount, activeCount) {
         mutableStateOf(maxOf(0, totalCount - activeCount))
     }
 
     val density = androidx.compose.ui.platform.LocalDensity.current
     val paddingLeftPx = with(density) { 40.dp.toPx() }
     val paddingRightPx = with(density) { 10.dp.toPx() }
+
+    // Dynamic Step and Gap Estimation
+    val expectedStep = remember(points) {
+        if (points.size < 2) 60000L
+        else {
+            val gaps = points.zipWithNext { a, b -> b.timestamp - a.timestamp }.filter { it > 0 }
+            if (gaps.isEmpty()) 60000L
+            else {
+                val sortedGaps = gaps.sorted()
+                sortedGaps[sortedGaps.size / 2]
+            }
+        }
+    }
+    val gapThreshold = expectedStep * 2.5
+
+    // Segmentation Helper
+    fun segmentPoints(pts: List<TimeSeriesPoint>, threshold: Double): List<List<TimeSeriesPoint>> {
+        if (pts.isEmpty()) return emptyList()
+        val segments = mutableListOf<List<TimeSeriesPoint>>()
+        var currentSegment = mutableListOf<TimeSeriesPoint>()
+        pts.forEachIndexed { idx, pt ->
+            if (idx == 0) {
+                currentSegment.add(pt)
+            } else {
+                val prev = pts[idx - 1]
+                if (pt.timestamp - prev.timestamp > threshold) {
+                    segments.add(currentSegment)
+                    currentSegment = mutableListOf()
+                }
+                currentSegment.add(pt)
+            }
+        }
+        if (currentSegment.isNotEmpty()) {
+            segments.add(currentSegment)
+        }
+        return segments
+    }
+
+    // Day boundaries calculation
+    data class DayInterval(val startTime: Long, val endTime: Long, val dayDiff: Int)
+
+    fun getDayIntervals(minTime: Long, maxTime: Long): List<DayInterval> {
+        val intervals = mutableListOf<DayInterval>()
+        val cal = java.util.Calendar.getInstance()
+        val todayStart = cal.apply {
+            set(java.util.Calendar.HOUR_OF_DAY, 0)
+            set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        
+        var current = minTime
+        while (current < maxTime) {
+            cal.timeInMillis = current
+            cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
+            cal.set(java.util.Calendar.MINUTE, 0)
+            cal.set(java.util.Calendar.SECOND, 0)
+            cal.set(java.util.Calendar.MILLISECOND, 0)
+            val dayStart = cal.timeInMillis
+            
+            cal.add(java.util.Calendar.DAY_OF_YEAR, 1)
+            val nextDayStart = cal.timeInMillis
+            
+            val segmentEnd = minOf(nextDayStart, maxTime)
+            val dayDiff = ((todayStart - dayStart) / (24 * 3600 * 1000)).toInt()
+            
+            intervals.add(DayInterval(current, segmentEnd, dayDiff))
+            current = segmentEnd
+        }
+        return intervals
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -914,7 +986,7 @@ fun TimeSeriesGraphDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(310.dp), // Increased to accommodate double graph comfortably
+                    .height(340.dp), // Increased to accommodate zoom chips and gap graphs
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
@@ -928,9 +1000,36 @@ fun TimeSeriesGraphDialog(
                         textAlign = TextAlign.Center
                     )
                 } else {
-                    Spacer(modifier = Modifier.height(5.dp))
+                    Spacer(modifier = Modifier.height(3.dp))
 
-                    // 1. FOCUS GRAPH (Large, detailed, zoom/scroll view)
+                    // 1. ZOOM SELECTOR ROW
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    ) {
+                        Text("Zoom:", color = TextSecondary, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        listOf(25, 100, 250, totalCount).forEach { count ->
+                            val isSelected = visiblePointsCount == count
+                            val label = if (count == totalCount) "Tout" else "$count pts"
+                            androidx.compose.material3.SuggestionChip(
+                                onClick = {
+                                    visiblePointsCount = count
+                                },
+                                label = { Text(label, fontSize = 8.sp, fontWeight = FontWeight.Bold) },
+                                colors = androidx.compose.material3.SuggestionChipDefaults.suggestionChipColors(
+                                    containerColor = if (isSelected) AccentCyan.copy(alpha = 0.2f) else Color.Transparent,
+                                    labelColor = if (isSelected) AccentCyan else TextSecondary
+                                ),
+                                border = BorderStroke(
+                                    width = 1.dp,
+                                    color = if (isSelected) AccentCyan else BorderColor.copy(alpha = 0.5f)
+                                )
+                            )
+                        }
+                    }
+
+                    // 2. FOCUS GRAPH (Large, detailed, zoom/scroll view)
                     Text(
                         text = "Scroll horizontal with finger 👈 👉",
                         color = TextSecondary,
@@ -1007,7 +1106,54 @@ fun TimeSeriesGraphDialog(
                                 val chartLeft = labelPaddingLeft
                                 val chartTop = 10.dp.toPx()
 
-                                // Draw Y-axis grid lines & labels (3 rows)
+                                // A. Draw Day Background Shading
+                                val dayIntervals = getDayIntervals(minTime, maxTime)
+                                dayIntervals.forEach { interval ->
+                                    val ratioStart = if (timeRange > 0) (interval.startTime - minTime).toFloat() / timeRange else 0f
+                                    val ratioEnd = if (timeRange > 0) (interval.endTime - minTime).toFloat() / timeRange else 1f
+                                    
+                                    val xStart = chartLeft + ratioStart * chartWidth
+                                    val xEnd = chartLeft + ratioEnd * chartWidth
+                                    
+                                    val color = when (interval.dayDiff) {
+                                        0 -> Color(0x06FFFFFF)      // Today: subtle grey/neutral
+                                        1 -> Color(0x0D6200EE)      // Yesterday: subtle indigo
+                                        2 -> Color(0x0D00E5FF)      // 2 days ago: subtle cyan
+                                        else -> Color(0x0DFF8F00)   // 3+ days ago: subtle orange
+                                    }
+                                    
+                                    drawRect(
+                                        color = color,
+                                        topLeft = Offset(xStart, chartTop),
+                                        size = androidx.compose.ui.geometry.Size(xEnd - xStart, chartHeight)
+                                    )
+                                    
+                                    // Draw midnight transition line
+                                    if (interval.endTime < maxTime) {
+                                        drawLine(
+                                            color = BorderColor.copy(alpha = 0.5f),
+                                            start = Offset(xEnd, chartTop),
+                                            end = Offset(xEnd, chartTop + chartHeight),
+                                            strokeWidth = 1.dp.toPx(),
+                                            pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(10f, 10f), 0f)
+                                        )
+                                        
+                                        val sdfDate = java.text.SimpleDateFormat("MMM dd", java.util.Locale.getDefault())
+                                        val dateStr = sdfDate.format(java.util.Date(interval.endTime))
+                                        drawText(
+                                            textMeasurer = textMeasurer,
+                                            text = dateStr,
+                                            style = androidx.compose.ui.text.TextStyle(
+                                                color = TextSecondary.copy(alpha = 0.8f),
+                                                fontSize = 7.5.sp,
+                                                fontWeight = FontWeight.Bold
+                                            ),
+                                            topLeft = Offset(xEnd + 3.dp.toPx(), chartTop + 4.dp.toPx())
+                                        )
+                                    }
+                                }
+
+                                // B. Draw Y-axis grid lines & labels (3 rows)
                                 val gridLineCount = 3
                                 for (i in 0 until gridLineCount) {
                                     val ratio = i.toFloat() / (gridLineCount - 1)
@@ -1034,7 +1180,7 @@ fun TimeSeriesGraphDialog(
                                     )
                                 }
 
-                                // Draw X-axis grid lines & labels (2 columns: start and end time)
+                                // C. Draw X-axis grid lines & labels (2 columns)
                                 val gridColCount = 2
                                 val sdf = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
                                 for (i in 0 until gridColCount) {
@@ -1066,49 +1212,54 @@ fun TimeSeriesGraphDialog(
                                     )
                                 }
 
-                                // Draw Focus chart path
-                                if (visiblePoints.size >= 2) {
-                                    val path = Path()
-                                    val fillPath = Path()
+                                // D. Draw Focus chart path with segment splitting (No lines on gaps)
+                                val focusSegments = segmentPoints(visiblePoints, gapThreshold.toDouble())
+                                focusSegments.forEach { segment ->
+                                    if (segment.size >= 2) {
+                                        val path = Path()
+                                        val fillPath = Path()
 
-                                    visiblePoints.forEachIndexed { idx, point ->
-                                        val ratioX = if (timeRange > 0) (point.timestamp - minTime).toFloat() / timeRange else 0f
-                                        val ratioY = if (valRange > 0) (point.value.toFloat() - minVal) / valRange else 0.5f
+                                        segment.forEachIndexed { idx, point ->
+                                            val ratioX = if (timeRange > 0) (point.timestamp - minTime).toFloat() / timeRange else 0f
+                                            val ratioY = if (valRange > 0) (point.value.toFloat() - minVal) / valRange else 0.5f
 
-                                        val x = chartLeft + ratioX * chartWidth
-                                        val y = chartTop + chartHeight * (1f - ratioY)
+                                            val x = chartLeft + ratioX * chartWidth
+                                            val y = chartTop + chartHeight * (1f - ratioY)
 
-                                        if (idx == 0) {
-                                            path.moveTo(x, y)
-                                            fillPath.moveTo(x, chartTop + chartHeight)
-                                            fillPath.lineTo(x, y)
-                                        } else {
-                                            path.lineTo(x, y)
-                                            fillPath.lineTo(x, y)
+                                            if (idx == 0) {
+                                                path.moveTo(x, y)
+                                                fillPath.moveTo(x, chartTop + chartHeight)
+                                                fillPath.lineTo(x, y)
+                                            } else {
+                                                path.lineTo(x, y)
+                                                fillPath.lineTo(x, y)
+                                            }
+                                            if (idx == segment.lastIndex) {
+                                                fillPath.lineTo(x, chartTop + chartHeight)
+                                                fillPath.close()
+                                            }
                                         }
-                                        if (idx == visiblePoints.lastIndex) {
-                                            fillPath.lineTo(x, chartTop + chartHeight)
-                                            fillPath.close()
-                                        }
+
+                                        drawPath(
+                                            path = fillPath,
+                                            brush = Brush.verticalGradient(
+                                                colors = listOf(AccentCyan.copy(alpha = 0.3f), Color.Transparent)
+                                            )
+                                        )
+
+                                        drawPath(
+                                            path = path,
+                                            color = AccentCyan,
+                                            style = Stroke(
+                                                width = 2.5.dp.toPx(),
+                                                cap = androidx.compose.ui.graphics.StrokeCap.Round,
+                                                join = androidx.compose.ui.graphics.StrokeJoin.Round
+                                            )
+                                        )
                                     }
-
-                                    drawPath(
-                                        path = fillPath,
-                                        brush = Brush.verticalGradient(
-                                            colors = listOf(AccentCyan.copy(alpha = 0.3f), Color.Transparent)
-                                        )
-                                    )
-
-                                    drawPath(
-                                        path = path,
-                                        color = AccentCyan,
-                                        style = Stroke(
-                                            width = 2.5.dp.toPx()
-                                        )
-                                    )
                                 }
 
-                                // Draw circles on Focus points (ronds indicateurs)
+                                // E. Draw indicator circles on Focus points
                                 visiblePoints.forEach { point ->
                                     val ratioX = if (timeRange > 0) (point.timestamp - minTime).toFloat() / timeRange else 0f
                                     val ratioY = if (valRange > 0) (point.value.toFloat() - minVal) / valRange else 0.5f
@@ -1134,7 +1285,7 @@ fun TimeSeriesGraphDialog(
 
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    // 2. CONTEXT/OVERVIEW GRAPH (Small navigation bar showing complete session)
+                    // 3. CONTEXT/OVERVIEW GRAPH (Small navigation bar showing complete session)
                     Text(
                         text = "Global Session Overview",
                         color = TextSecondary,
@@ -1163,27 +1314,48 @@ fun TimeSeriesGraphDialog(
                                 val overviewWidth = size.width
                                 val overviewHeight = size.height
 
-                                // Draw complete thin global line
-                                val globalPath = Path()
-                                points.forEachIndexed { idx, point ->
-                                    val ratioX = if (timeRangeGlobal > 0) (point.timestamp - minTimeGlobal).toFloat() / timeRangeGlobal else 0f
-                                    val ratioY = (point.value.toFloat() - minValGlobal) / valRangeGlobal
+                                // Draw complete thin global line with segment splitting on gaps
+                                val globalSegments = segmentPoints(points, gapThreshold.toDouble())
+                                globalSegments.forEach { segment ->
+                                    if (segment.size >= 2) {
+                                        val globalPath = Path()
+                                        segment.forEachIndexed { idx, point ->
+                                            val ratioX = if (timeRangeGlobal > 0) (point.timestamp - minTimeGlobal).toFloat() / timeRangeGlobal else 0f
+                                            val ratioY = (point.value.toFloat() - minValGlobal) / valRangeGlobal
 
-                                    val x = ratioX * overviewWidth
-                                    val y = 4.dp.toPx() + (overviewHeight - 8.dp.toPx()) * (1f - ratioY)
+                                            val x = ratioX * overviewWidth
+                                            val y = 4.dp.toPx() + (overviewHeight - 8.dp.toPx()) * (1f - ratioY)
 
-                                    if (idx == 0) {
-                                        globalPath.moveTo(x, y)
-                                    } else {
-                                        globalPath.lineTo(x, y)
+                                            if (idx == 0) {
+                                                globalPath.moveTo(x, y)
+                                            } else {
+                                                globalPath.lineTo(x, y)
+                                            }
+                                        }
+
+                                        drawPath(
+                                            path = globalPath,
+                                            color = AccentCyan.copy(alpha = 0.5f),
+                                            style = Stroke(
+                                                width = 1.dp.toPx(),
+                                                cap = androidx.compose.ui.graphics.StrokeCap.Round,
+                                                join = androidx.compose.ui.graphics.StrokeJoin.Round
+                                            )
+                                        )
+                                    } else if (segment.size == 1) {
+                                        val point = segment[0]
+                                        val ratioX = if (timeRangeGlobal > 0) (point.timestamp - minTimeGlobal).toFloat() / timeRangeGlobal else 0f
+                                        val ratioY = (point.value.toFloat() - minValGlobal) / valRangeGlobal
+                                        val x = ratioX * overviewWidth
+                                        val y = 4.dp.toPx() + (overviewHeight - 8.dp.toPx()) * (1f - ratioY)
+                                        
+                                        drawCircle(
+                                            color = AccentCyan.copy(alpha = 0.5f),
+                                            radius = 1.5.dp.toPx(),
+                                            center = Offset(x, y)
+                                        )
                                     }
                                 }
-
-                                drawPath(
-                                    path = globalPath,
-                                    color = AccentCyan.copy(alpha = 0.5f),
-                                    style = Stroke(width = 1.dp.toPx())
-                                )
 
                                 // Draw translucent focus highlight rectangle (le "viseur")
                                 val startRatio = startIndex.toFloat() / points.size.toFloat()

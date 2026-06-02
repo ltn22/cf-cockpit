@@ -97,10 +97,19 @@ class MainScreenViewModel(application: android.app.Application) : androidx.lifec
             }
             try {
                 val list = CoapService.bootstrap(session.host, session.port, session.timeout)
+                val loadedList = list.map { transducer ->
+                    val savedPoints = com.example.cockpit.db.SensorDatabaseHelper.loadPoints(
+                        getApplication(),
+                        session.host,
+                        transducer.typeSid,
+                        transducer.id
+                    )
+                    transducer.copy(timeSeries = savedPoints)
+                }
                 updateSession(sessionId) {
                     it.copy(
                         connectionState = ConnectionState.Connected,
-                        transducers = list
+                        transducers = loadedList
                     )
                 }
                 
@@ -346,11 +355,20 @@ class MainScreenViewModel(application: android.app.Application) : androidx.lifec
                                 val updatedTransducers = activeSession.transducers.toMutableList()
                                 val idx = updatedTransducers.indexOfFirst { it.id == transducer.id && it.typeSid == transducer.typeSid }
                                 if (idx != -1) {
-                                    val currentPoints = updatedTransducers[idx].timeSeries
-                                    val mergedMap = (currentPoints + newPoints).associateBy { it.timestamp }
-                                    val mergedHistory = mergedMap.values.sortedBy { it.timestamp }.takeLast(1000)
-
-                                    updatedTransducers[idx] = updatedTransducers[idx].copy(timeSeries = mergedHistory)
+                                    com.example.cockpit.db.SensorDatabaseHelper.savePoints(
+                                        getApplication(),
+                                        activeSession.host,
+                                        transducer.typeSid,
+                                        transducer.id,
+                                        newPoints
+                                    )
+                                    val updatedHistory = com.example.cockpit.db.SensorDatabaseHelper.loadPoints(
+                                        getApplication(),
+                                        activeSession.host,
+                                        transducer.typeSid,
+                                        transducer.id
+                                    )
+                                    updatedTransducers[idx] = updatedTransducers[idx].copy(timeSeries = updatedHistory)
                                     updateSession(sessionId) { it.copy(transducers = updatedTransducers) }
                                 }
                             }
@@ -417,11 +435,20 @@ class MainScreenViewModel(application: android.app.Application) : androidx.lifec
                                         val updatedTransducers = activeSession.transducers.toMutableList()
                                         val idx = updatedTransducers.indexOfFirst { it.id == transducer.id && it.typeSid == transducer.typeSid }
                                         if (idx != -1) {
-                                            val currentPoints = updatedTransducers[idx].timeSeries
-                                            val mergedMap = (currentPoints + newPoints).associateBy { it.timestamp }
-                                            val mergedHistory = mergedMap.values.sortedBy { it.timestamp }.takeLast(1000)
-
-                                            updatedTransducers[idx] = updatedTransducers[idx].copy(timeSeries = mergedHistory)
+                                            com.example.cockpit.db.SensorDatabaseHelper.savePoints(
+                                                getApplication(),
+                                                activeSession.host,
+                                                transducer.typeSid,
+                                                transducer.id,
+                                                newPoints
+                                            )
+                                            val updatedHistory = com.example.cockpit.db.SensorDatabaseHelper.loadPoints(
+                                                getApplication(),
+                                                activeSession.host,
+                                                transducer.typeSid,
+                                                transducer.id
+                                            )
+                                            updatedTransducers[idx] = updatedTransducers[idx].copy(timeSeries = updatedHistory)
                                             updateSession(session.id) { it.copy(transducers = updatedTransducers) }
                                         }
                                     }
