@@ -49,8 +49,7 @@ class RemoteDevice:
         self._alert_thresholds = {}  # f -> (t_min_raw, t_max_raw)
 
     async def init_model(self):
-        sid_name = self.yang_model_name if self.yang_model_name.endswith('.sid') else f"{self.yang_model_name}.sid"
-        sid_file = f"../terraforma/{sid_name}"
+        sid_file = self.yang_model_name if self.yang_model_name.endswith('.sid') else f"{self.yang_model_name}.sid"
         log.debug("Loading SID file: %s", sid_file)
         self.model = CORECONFModel(sid_file)
         log.debug("Creating CoAP client context")
