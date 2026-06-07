@@ -49,7 +49,8 @@ class RemoteDevice:
         self._alert_thresholds = {}  # f -> (t_min_raw, t_max_raw)
 
     async def init_model(self):
-        sid_file = self.yang_model_name if self.yang_model_name.endswith('.sid') else f"{self.yang_model_name}.sid"
+        sid_name = self.yang_model_name if self.yang_model_name.endswith('.sid') else f"{self.yang_model_name}.sid"
+        sid_file = f"../terraforma/{sid_name}"
         log.debug("Loading SID file: %s", sid_file)
         self.model = CORECONFModel(sid_file)
         log.debug("Creating CoAP client context")
@@ -1012,7 +1013,7 @@ def main():
     parser = argparse.ArgumentParser(description="Cockpit2 GUI Dashboard")
     parser.add_argument("--host", type=str, default="[::1]", help="CoAP Server Host (default: [::1])")
     parser.add_argument("--port", type=int, default=None, help="CoAP Server Port")
-    parser.add_argument("--model", type=str, default="coreconf-m2m@2026-03-29", help="YANG Model Name")
+    parser.add_argument("--model", type=str, default="coreconf-m2m@2026-06-07", help="YANG Model Name")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose network logging")
     args = parser.parse_args()
 
