@@ -435,7 +435,7 @@ def main():
     parser = argparse.ArgumentParser(description="Cockpit CLI — monitoring de capteurs IoT")
     parser.add_argument("--host",  default="[::1]",                  help="Hôte CoAP (défaut: [::1])")
     parser.add_argument("--port",  type=int, default=None,           help="Port CoAP")
-    parser.add_argument("--model",   default="coreconf-m2m@2026-03-29", help="Nom du modèle YANG")
+    parser.add_argument("--model",   default="coreconf-m2m@2026-06-07", help="Nom du modèle YANG")
     parser.add_argument("--timeout", type=float, default=10.0,          help="Timeout CoAP en secondes (défaut: 10)")
     parser.add_argument("-v", "--verbose", action="store_true",         help="Logs détaillés")
     args = parser.parse_args()
