@@ -1,5 +1,8 @@
 import java.io.FileInputStream
 import java.util.Properties
+import java.text.SimpleDateFormat
+import java.util.Locale
+import java.util.Date
 
 plugins {
   alias(libs.plugins.android.application)
@@ -31,8 +34,11 @@ android {
         applicationId = "fr.schcchair.coreconf_m2m"
         minSdk = 24
         targetSdk = 36
-        versionCode = 4
-        versionName = "1.3"
+        versionCode = 6
+        versionName = "1.5"
+
+        val formattedDate = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date())
+        buildConfigField("String", "BUILD_TIME", "\"$formattedDate\"")
 
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
@@ -53,7 +59,7 @@ android {
     buildFeatures {
       compose = true
       aidl = false
-      buildConfig = false
+      buildConfig = true
       shaders = false
     }
 

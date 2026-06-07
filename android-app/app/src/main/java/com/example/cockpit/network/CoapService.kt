@@ -444,6 +444,7 @@ object CoapService {
                     Log.d(TAG, "Observe decoded notification: $decoded")
                     val readings = mutableListOf<com.example.cockpit.model.TimeSeriesPoint>()
                     val now = System.currentTimeMillis()
+                    val roundedNow = if (step > 0) ((now + step / 2) / step) * step else now
 
                     when (decoded) {
                         is List<*> -> {
@@ -454,8 +455,8 @@ object CoapService {
                                 when (item) {
                                     is Number -> {
                                         accumulator += item.toDouble()
-                                        // Space out backwards from now by actual step
-                                        val t = now - (size - 1 - i) * step
+                                        // Space out backwards from roundedNow by actual step
+                                        val t = roundedNow - (size - 1 - i) * step
                                         readings.add(
                                             com.example.cockpit.model.TimeSeriesPoint(
                                                 timestamp = t,
@@ -467,7 +468,7 @@ object CoapService {
                                     }
                                     is List<*> -> {
                                         if (item.size >= 2) {
-                                            val t = (item[0] as? Number)?.toLong() ?: now
+                                            val t = (item[0] as? Number)?.toLong() ?: (roundedNow / 1000L)
                                             val v = (item[1] as? Number)?.toDouble() ?: 0.0
                                             accumulator += v
                                             readings.add(
@@ -508,8 +509,8 @@ object CoapService {
                                     val item = valuesList[i]
                                     if (item is Number) {
                                         accumulator += item.toDouble()
-                                        // Space out backwards from now by actual step
-                                        val t = now - (size - 1 - i) * step
+                                        // Space out backwards from roundedNow by actual step
+                                        val t = roundedNow - (size - 1 - i) * step
                                         readings.add(
                                             com.example.cockpit.model.TimeSeriesPoint(
                                                 timestamp = t,
@@ -519,7 +520,7 @@ object CoapService {
                                             )
                                         )
                                     } else if (item is List<*> && item.size >= 2) {
-                                        val t = (item[0] as? Number)?.toLong() ?: now
+                                        val t = (item[0] as? Number)?.toLong() ?: (roundedNow / 1000L)
                                         val v = (item[1] as? Number)?.toDouble() ?: 0.0
                                         accumulator += v
                                         readings.add(
@@ -538,7 +539,7 @@ object CoapService {
                                 if (valueObj is Number) {
                                     readings.add(
                                         com.example.cockpit.model.TimeSeriesPoint(
-                                            timestamp = now,
+                                            timestamp = roundedNow,
                                             value = valueObj.toDouble() / scale,
                                             rawDelta = valueObj.toDouble(),
                                             isReference = true
@@ -550,7 +551,7 @@ object CoapService {
                         is Number -> {
                             readings.add(
                                 com.example.cockpit.model.TimeSeriesPoint(
-                                    timestamp = now,
+                                    timestamp = roundedNow,
                                     value = decoded.toDouble() / scale,
                                     rawDelta = decoded.toDouble(),
                                     isReference = true

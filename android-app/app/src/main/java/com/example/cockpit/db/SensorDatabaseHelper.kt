@@ -50,12 +50,12 @@ object SensorDatabaseHelper {
             db = helper.writableDatabase
             db.beginTransaction()
             
-            // Prune data older than 3 days
-            val threeDaysAgo = System.currentTimeMillis() - 3L * 24 * 3600 * 1000
-            db.delete(TABLE_POINTS, "$COL_TIMESTAMP < ?", arrayOf(threeDaysAgo.toString()))
+            // Prune data older than 7 days
+            val sevenDaysAgo = System.currentTimeMillis() - 7L * 24 * 3600 * 1000
+            db.delete(TABLE_POINTS, "$COL_TIMESTAMP < ?", arrayOf(sevenDaysAgo.toString()))
 
             for (point in points) {
-                if (point.timestamp >= threeDaysAgo) {
+                if (point.timestamp >= sevenDaysAgo) {
                     val values = ContentValues().apply {
                         put(COL_TIMESTAMP, point.timestamp)
                         put(COL_VALUE, point.value)
@@ -93,14 +93,14 @@ object SensorDatabaseHelper {
         try {
             db = helper.readableDatabase
             
-            // Prune old data on query (and load only points >= 3 days)
-            val threeDaysAgo = System.currentTimeMillis() - 3L * 24 * 3600 * 1000
+            // Prune old data on query (and load only points >= 7 days)
+            val sevenDaysAgo = System.currentTimeMillis() - 7L * 24 * 3600 * 1000
             
             cursor = db.query(
                 TABLE_POINTS,
                 arrayOf(COL_TIMESTAMP, COL_VALUE, COL_RAW_DELTA, COL_IS_REFERENCE),
                 "$COL_TIMESTAMP >= ?",
-                arrayOf(threeDaysAgo.toString()),
+                arrayOf(sevenDaysAgo.toString()),
                 null, null,
                 "$COL_TIMESTAMP ASC"
             )

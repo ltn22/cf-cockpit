@@ -70,6 +70,14 @@ fun MainScreen(
     val sessions by viewModel.sessions.collectAsStateWithLifecycle()
     val pagerState = rememberPagerState(pageCount = { sessions.size })
 
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val versionName = remember {
+        try {
+            val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+            packageInfo.versionName ?: ""
+        } catch (e: Exception) { "" }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -81,11 +89,32 @@ fun MainScreen(
                     } else {
                         "Cockpit IoT Client"
                     }
-                    Text(
-                        text = titleText,
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = titleText,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
+                        )
+                        if (versionName.isNotEmpty()) {
+                            Surface(
+                                color = AccentPurple.copy(alpha = 0.2f),
+                                border = BorderStroke(1.dp, AccentPurple.copy(alpha = 0.5f)),
+                                shape = RoundedCornerShape(4.dp),
+                                modifier = Modifier.padding(top = 2.dp)
+                            ) {
+                                Text(
+                                    text = "v$versionName",
+                                    color = AccentCyan,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
                 },
                 actions = {
                     val currentPage = pagerState.currentPage
@@ -200,7 +229,7 @@ fun MainScreen(
                                 },
                                 onSensorLongClick = { transducer ->
                                     if (transducer.isObserving) {
-                                        activeValuesTransducer = transducer
+                                        activeGraphTransducer = transducer
                                     } else {
                                         configHistoryTransducer = transducer
                                     }
@@ -208,8 +237,8 @@ fun MainScreen(
                                 onStatsClick = { transducer ->
                                     viewModel.toggleStatsView(session.id, transducer)
                                 },
-                                onGraphClick = { transducer ->
-                                    activeGraphTransducer = transducer
+                                onHourglassClick = { transducer ->
+                                    activeValuesTransducer = transducer
                                 }
                             )
 
@@ -291,6 +320,14 @@ fun ServerPlusScreen(
     session: ServerSession,
     onAddClick: () -> Unit
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val versionName = remember {
+        try {
+            val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+            packageInfo.versionName ?: ""
+        } catch (e: Exception) { "" }
+    }
+
     val infiniteTransition = rememberInfiniteTransition(label = "GlowAnimation")
     val pulseScale by infiniteTransition.animateFloat(
         initialValue = 1.0f,
@@ -311,66 +348,94 @@ fun ServerPlusScreen(
         label = "AlphaPulse"
     )
 
-    Column(
+    Box(
         modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
+        contentAlignment = Alignment.Center
     ) {
-
-
-        Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier.size(160.dp)
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
         ) {
-            // Pulsing outer glow ring
             Box(
-                modifier = Modifier
-                    .size(100.dp)
-                    .scale(pulseScale)
-                    .border(
-                        width = 4.dp,
-                        color = AccentCyan.copy(alpha = pulseAlpha),
-                        shape = RoundedCornerShape(50)
-                    )
-            )
-
-            // Main glowing central plus button
-            Box(
-                modifier = Modifier
-                    .size(100.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(CardBackground)
-                    .border(
-                        2.dp,
-                        Brush.horizontalGradient(listOf(AccentCyan, AccentPurple)),
-                        RoundedCornerShape(50)
-                    )
-                    .clickable(onClick = onAddClick),
-                contentAlignment = Alignment.Center
+                contentAlignment = Alignment.Center,
+                modifier = Modifier.size(160.dp)
             ) {
-                Text(
-                    text = "+",
-                    color = AccentCyan,
-                    fontSize = 48.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.offset(y = (-3).dp) // visual adjustment
+                // Pulsing outer glow ring
+                Box(
+                    modifier = Modifier
+                        .size(100.dp)
+                        .scale(pulseScale)
+                        .border(
+                            width = 4.dp,
+                            color = AccentCyan.copy(alpha = pulseAlpha),
+                            shape = RoundedCornerShape(50)
+                        )
                 )
+
+                // Main glowing central plus button
+                Box(
+                    modifier = Modifier
+                        .size(100.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(CardBackground)
+                        .border(
+                            2.dp,
+                            Brush.horizontalGradient(listOf(AccentCyan, AccentPurple)),
+                            RoundedCornerShape(50)
+                        )
+                        .clickable(onClick = onAddClick),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "+",
+                        color = AccentCyan,
+                        fontSize = 48.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.offset(y = (-3).dp) // visual adjustment
+                    )
+                }
             }
+
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = "Add CoAP Server",
+                color = TextPrimary,
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp
+            )
+            Text(
+                text = "Tap + to monitor a machine",
+                color = TextSecondary,
+                fontSize = 14.sp,
+                modifier = Modifier.padding(top = 4.dp)
+            )
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
-        Text(
-            text = "Add CoAP Server",
-            color = TextPrimary,
-            fontWeight = FontWeight.Bold,
-            fontSize = 18.sp
-        )
-        Text(
-            text = "Tap + to monitor a machine",
-            color = TextSecondary,
-            fontSize = 14.sp,
-            modifier = Modifier.padding(top = 4.dp)
-        )
+        if (versionName.isNotEmpty()) {
+            val buildTime = com.example.cockpit.BuildConfig.BUILD_TIME
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 24.dp)
+            ) {
+                Text(
+                    text = "Version $versionName",
+                    color = TextSecondary.copy(alpha = 0.6f),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                if (buildTime.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "Build: $buildTime",
+                        color = TextSecondary.copy(alpha = 0.4f),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -477,7 +542,7 @@ fun HistoryConfigDialog(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "Delta Encodé",
+                            text = "Encoded Delta",
                             color = if (encodingDelta) AccentCyan else TextSecondary,
                             fontWeight = FontWeight.Bold,
                             fontSize = 13.sp
@@ -499,7 +564,7 @@ fun HistoryConfigDialog(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "Brut (Plain)",
+                            text = "Plain (Raw)",
                             color = if (!encodingDelta) AccentCyan else TextSecondary,
                             fontWeight = FontWeight.Bold,
                             fontSize = 13.sp
@@ -653,7 +718,7 @@ fun SensorDashboardGrid(
     onSensorClick: (Transducer) -> Unit,
     onSensorLongClick: (Transducer) -> Unit,
     onStatsClick: (Transducer) -> Unit,
-    onGraphClick: (Transducer) -> Unit
+    onHourglassClick: (Transducer) -> Unit
 ) {
     if (transducers.isEmpty()) {
         Box(
@@ -676,7 +741,7 @@ fun SensorDashboardGrid(
                     onClick = { onSensorClick(transducer) },
                     onLongClick = { onSensorLongClick(transducer) },
                     onStatsClick = { onStatsClick(transducer) },
-                    onGraphClick = { onGraphClick(transducer) }
+                    onHourglassClick = { onHourglassClick(transducer) }
                 )
             }
         }
@@ -689,7 +754,7 @@ fun SensorCard(
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     onStatsClick: () -> Unit,
-    onGraphClick: () -> Unit
+    onHourglassClick: () -> Unit
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
@@ -841,7 +906,7 @@ fun SensorCard(
                     )
 
                     IconButton(
-                        onClick = onGraphClick,
+                        onClick = onHourglassClick,
                         modifier = Modifier
                             .size(24.dp)
                             .scale(1.1f)
@@ -887,6 +952,17 @@ fun TimeSeriesGraphDialog(
     // State for scroll index (starting point of visible window)
     var startIndex by remember(totalCount, activeCount) {
         mutableStateOf(maxOf(0, totalCount - activeCount))
+    }
+
+    // Real-time ticking state to drive animations and shift the timeline in real time
+    var tick by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(key1 = transducer.isObserving) {
+        if (transducer.isObserving) {
+            while (true) {
+                kotlinx.coroutines.delay(1000L)
+                tick = System.currentTimeMillis()
+            }
+        }
     }
 
     val density = androidx.compose.ui.platform.LocalDensity.current
@@ -956,7 +1032,8 @@ fun TimeSeriesGraphDialog(
             val nextDayStart = cal.timeInMillis
             
             val segmentEnd = minOf(nextDayStart, maxTime)
-            val dayDiff = ((todayStart - dayStart) / (24 * 3600 * 1000)).toInt()
+            val diffMs = todayStart - dayStart
+            val dayDiff = Math.round(diffMs.toDouble() / (24 * 3600 * 1000)).toInt()
             
             intervals.add(DayInterval(current, segmentEnd, dayDiff))
             current = segmentEnd
@@ -1082,16 +1159,26 @@ fun TimeSeriesGraphDialog(
                                 }
                         ) {
                             if (visiblePoints.isNotEmpty()) {
-                                val minTimeRaw = visiblePoints.first().timestamp
-                                val maxTimeRaw = visiblePoints.last().timestamp
-                                val (minTime, maxTime, timeRange) = if (maxTimeRaw > minTimeRaw) {
-                                    Triple(minTimeRaw, maxTimeRaw, (maxTimeRaw - minTimeRaw).toFloat())
+                                // Slide the timeline right edge to the current real-time tick if we are looking at the latest data
+                                val isLatest = startIndex >= maxOf(0, points.size - activeCount)
+                                val maxTimeRaw = if (isLatest && transducer.isObserving) tick else (visiblePoints.lastOrNull()?.timestamp ?: tick)
+                                val minTime = maxTimeRaw - activeCount * expectedStep
+                                val maxTime = maxTimeRaw
+                                val timeRange = (maxTime - minTime).toFloat()
+
+                                // Only calculate min/max values for points actually falling in the visible time window
+                                val pointsInWindow = visiblePoints.filter { it.timestamp in minTime..maxTime }
+                                val minValRaw = if (pointsInWindow.isNotEmpty()) {
+                                    pointsInWindow.minOf { it.value }.toFloat()
                                 } else {
-                                    Triple(minTimeRaw - 30000L, minTimeRaw + 30000L, 60000f)
+                                    (visiblePoints.lastOrNull()?.value?.toFloat() ?: 0f) - 1f
+                                }
+                                val maxValRaw = if (pointsInWindow.isNotEmpty()) {
+                                    pointsInWindow.maxOf { it.value }.toFloat()
+                                } else {
+                                    (visiblePoints.lastOrNull()?.value?.toFloat() ?: 0f) + 1f
                                 }
 
-                                val minValRaw = visiblePoints.minOf { it.value }.toFloat()
-                                val maxValRaw = visiblePoints.maxOf { it.value }.toFloat()
                                 val (minVal, maxVal, valRange) = if (maxValRaw > minValRaw) {
                                     Triple(minValRaw, maxValRaw, maxValRaw - minValRaw)
                                 } else {
@@ -1106,54 +1193,7 @@ fun TimeSeriesGraphDialog(
                                 val chartLeft = labelPaddingLeft
                                 val chartTop = 10.dp.toPx()
 
-                                // A. Draw Day Background Shading
-                                val dayIntervals = getDayIntervals(minTime, maxTime)
-                                dayIntervals.forEach { interval ->
-                                    val ratioStart = if (timeRange > 0) (interval.startTime - minTime).toFloat() / timeRange else 0f
-                                    val ratioEnd = if (timeRange > 0) (interval.endTime - minTime).toFloat() / timeRange else 1f
-                                    
-                                    val xStart = chartLeft + ratioStart * chartWidth
-                                    val xEnd = chartLeft + ratioEnd * chartWidth
-                                    
-                                    val color = when (interval.dayDiff) {
-                                        0 -> Color(0x06FFFFFF)      // Today: subtle grey/neutral
-                                        1 -> Color(0x0D6200EE)      // Yesterday: subtle indigo
-                                        2 -> Color(0x0D00E5FF)      // 2 days ago: subtle cyan
-                                        else -> Color(0x0DFF8F00)   // 3+ days ago: subtle orange
-                                    }
-                                    
-                                    drawRect(
-                                        color = color,
-                                        topLeft = Offset(xStart, chartTop),
-                                        size = androidx.compose.ui.geometry.Size(xEnd - xStart, chartHeight)
-                                    )
-                                    
-                                    // Draw midnight transition line
-                                    if (interval.endTime < maxTime) {
-                                        drawLine(
-                                            color = BorderColor.copy(alpha = 0.5f),
-                                            start = Offset(xEnd, chartTop),
-                                            end = Offset(xEnd, chartTop + chartHeight),
-                                            strokeWidth = 1.dp.toPx(),
-                                            pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(10f, 10f), 0f)
-                                        )
-                                        
-                                        val sdfDate = java.text.SimpleDateFormat("MMM dd", java.util.Locale.getDefault())
-                                        val dateStr = sdfDate.format(java.util.Date(interval.endTime))
-                                        drawText(
-                                            textMeasurer = textMeasurer,
-                                            text = dateStr,
-                                            style = androidx.compose.ui.text.TextStyle(
-                                                color = TextSecondary.copy(alpha = 0.8f),
-                                                fontSize = 7.5.sp,
-                                                fontWeight = FontWeight.Bold
-                                            ),
-                                            topLeft = Offset(xEnd + 3.dp.toPx(), chartTop + 4.dp.toPx())
-                                        )
-                                    }
-                                }
-
-                                // B. Draw Y-axis grid lines & labels (3 rows)
+                                // A. Draw Y-axis grid lines & labels (3 rows)
                                 val gridLineCount = 3
                                 for (i in 0 until gridLineCount) {
                                     val ratio = i.toFloat() / (gridLineCount - 1)
@@ -1180,7 +1220,7 @@ fun TimeSeriesGraphDialog(
                                     )
                                 }
 
-                                // C. Draw X-axis grid lines & labels (2 columns)
+                                // B. Draw X-axis grid lines & labels (2 columns)
                                 val gridColCount = 2
                                 val sdf = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
                                 for (i in 0 until gridColCount) {
@@ -1210,6 +1250,62 @@ fun TimeSeriesGraphDialog(
                                         textLayoutResult = textLayoutResult,
                                         topLeft = Offset(textX, chartTop + chartHeight + 4.dp.toPx())
                                     )
+                                }
+
+                                // CLIP DRAWING to chart bounds to prevent overlapping labels
+                                drawContext.canvas.save()
+                                drawContext.canvas.clipRect(
+                                    left = chartLeft,
+                                    top = chartTop,
+                                    right = chartLeft + chartWidth,
+                                    bottom = chartTop + chartHeight
+                                )
+
+                                // C. Draw Day Background Shading & Midnight lines
+                                val dayIntervals = getDayIntervals(minTime, maxTime)
+                                dayIntervals.forEach { interval ->
+                                    val ratioStart = if (timeRange > 0) (interval.startTime - minTime).toFloat() / timeRange else 0f
+                                    val ratioEnd = if (timeRange > 0) (interval.endTime - minTime).toFloat() / timeRange else 1f
+                                    
+                                    val xStart = chartLeft + ratioStart * chartWidth
+                                    val xEnd = chartLeft + ratioEnd * chartWidth
+                                    
+                                    val color = when (interval.dayDiff) {
+                                        0 -> Color(0x12FFFFFF)      // Today: subtle grey/white overlay (~7% opacity)
+                                        1 -> Color(0x1F9D4EDD)      // Yesterday: Purple tint (~12% opacity)
+                                        2 -> Color(0x1F00F0FF)      // 2 days ago: Cyan tint (~12% opacity)
+                                        else -> Color(0x1FFF8F00)   // 3+ days ago: Orange/Warm tint (~12% opacity)
+                                    }
+                                    
+                                    drawRect(
+                                        color = color,
+                                        topLeft = Offset(xStart, chartTop),
+                                        size = androidx.compose.ui.geometry.Size(xEnd - xStart, chartHeight)
+                                    )
+                                    
+                                    // Draw midnight transition line
+                                    if (interval.endTime < maxTime) {
+                                        drawLine(
+                                            color = AccentPurple.copy(alpha = 0.8f),
+                                            start = Offset(xEnd, chartTop),
+                                            end = Offset(xEnd, chartTop + chartHeight),
+                                            strokeWidth = 1.5.dp.toPx(),
+                                            pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(10f, 10f), 0f)
+                                        )
+                                        
+                                        val sdfDate = java.text.SimpleDateFormat("MMM dd", java.util.Locale.getDefault())
+                                        val dateStr = sdfDate.format(java.util.Date(interval.endTime))
+                                        drawText(
+                                            textMeasurer = textMeasurer,
+                                            text = dateStr,
+                                            style = androidx.compose.ui.text.TextStyle(
+                                                color = AccentCyan,
+                                                fontSize = 8.sp,
+                                                fontWeight = FontWeight.Bold
+                                            ),
+                                            topLeft = Offset(xEnd + 4.dp.toPx(), chartTop + 6.dp.toPx())
+                                        )
+                                    }
                                 }
 
                                 // D. Draw Focus chart path with segment splitting (No lines on gaps)
@@ -1279,6 +1375,8 @@ fun TimeSeriesGraphDialog(
                                         style = Stroke(width = 1.dp.toPx())
                                     )
                                 }
+
+                                drawContext.canvas.restore()
                             }
                         }
                     }
@@ -1304,7 +1402,7 @@ fun TimeSeriesGraphDialog(
                         androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
                             if (points.size >= 2) {
                                 val minTimeGlobal = points.first().timestamp
-                                val maxTimeGlobal = points.last().timestamp
+                                val maxTimeGlobal = if (transducer.isObserving) tick else points.last().timestamp
                                 val timeRangeGlobal = (maxTimeGlobal - minTimeGlobal).toFloat()
 
                                 val minValGlobal = points.minOf { it.value }.toFloat()
@@ -1313,6 +1411,22 @@ fun TimeSeriesGraphDialog(
 
                                 val overviewWidth = size.width
                                 val overviewHeight = size.height
+
+                                // Draw discrete vertical dashed lines at midnight (day changes)
+                                val globalDayIntervals = getDayIntervals(minTimeGlobal, maxTimeGlobal)
+                                globalDayIntervals.forEach { interval ->
+                                    if (interval.endTime < maxTimeGlobal) {
+                                        val ratioX = if (timeRangeGlobal > 0) (interval.endTime - minTimeGlobal).toFloat() / timeRangeGlobal else 0f
+                                        val x = ratioX * overviewWidth
+                                        drawLine(
+                                            color = AccentPurple.copy(alpha = 0.6f),
+                                            start = Offset(x, 0f),
+                                            end = Offset(x, overviewHeight),
+                                            strokeWidth = 1.2.dp.toPx(),
+                                            pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(6f, 6f), 0f)
+                                        )
+                                    }
+                                }
 
                                 // Draw complete thin global line with segment splitting on gaps
                                 val globalSegments = segmentPoints(points, gapThreshold.toDouble())
@@ -1357,9 +1471,14 @@ fun TimeSeriesGraphDialog(
                                     }
                                 }
 
-                                // Draw translucent focus highlight rectangle (le "viseur")
-                                val startRatio = startIndex.toFloat() / points.size.toFloat()
-                                val endRatio = (startIndex + activeCount).toFloat() / points.size.toFloat()
+                                // Draw translucent focus highlight rectangle (the time-based "viewfinder")
+                                val isLatest = startIndex >= maxOf(0, points.size - activeCount)
+                                val maxTimeRaw = if (isLatest && transducer.isObserving) tick else (visiblePoints.lastOrNull()?.timestamp ?: tick)
+                                val minTime = maxTimeRaw - activeCount * expectedStep
+                                val maxTime = maxTimeRaw
+
+                                val startRatio = if (timeRangeGlobal > 0) ((minTime - minTimeGlobal).toFloat() / timeRangeGlobal).coerceIn(0f, 1f) else 0f
+                                val endRatio = if (timeRangeGlobal > 0) ((maxTime - minTimeGlobal).toFloat() / timeRangeGlobal).coerceIn(0f, 1f) else 1f
                                 val rectLeft = startRatio * overviewWidth
                                 val rectWidth = (endRatio - startRatio) * overviewWidth
 

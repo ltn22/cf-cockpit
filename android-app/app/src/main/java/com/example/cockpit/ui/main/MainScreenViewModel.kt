@@ -14,7 +14,20 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 class MainScreenViewModel(application: android.app.Application) : androidx.lifecycle.AndroidViewModel(application) {
-    private val _sessions = MutableStateFlow<List<ServerSession>>(listOf(ServerSession()))
+    private val prefs = application.getSharedPreferences("cockpit_prefs", android.content.Context.MODE_PRIVATE)
+
+    private val _sessions = MutableStateFlow<List<ServerSession>>(
+        listOf(
+            ServerSession(
+                host = prefs.getString("last_host", "atmos.openschc.net") ?: "atmos.openschc.net",
+                port = if (prefs.contains("last_port")) {
+                    val p = prefs.getInt("last_port", 5683)
+                    if (p == -1) null else p
+                } else 5683,
+                timeout = prefs.getInt("last_timeout", 10)
+            )
+        )
+    )
     val sessions: StateFlow<List<ServerSession>> = _sessions.asStateFlow()
 
     private data class ObsConfig(
@@ -111,6 +124,18 @@ class MainScreenViewModel(application: android.app.Application) : androidx.lifec
                         connectionState = ConnectionState.Connected,
                         transducers = loadedList
                     )
+                }
+
+                // Save to preferences on successful bootstrap
+                prefs.edit().apply {
+                    putString("last_host", session.host)
+                    if (session.port != null) {
+                        putInt("last_port", session.port)
+                    } else {
+                        putInt("last_port", -1)
+                    }
+                    putInt("last_timeout", session.timeout)
+                    apply()
                 }
                 
                 // If the connected session was the only idle/error one, append a new empty session
@@ -321,7 +346,7 @@ class MainScreenViewModel(application: android.app.Application) : androidx.lifec
             // Start observation by first running iPATCH in a coroutine, then establishing subscription
             val config = ObsConfig(step, maxSamples, encoding, checkInterval)
             activeObsConfigs[obsKey] = config
-            currentTransducers[index] = targetTransducer.copy(isObserving = true, timeSeries = emptyList())
+            currentTransducers[index] = targetTransducer.copy(isObserving = true)
             updateSession(sessionId) { it.copy(transducers = currentTransducers) }
 
             viewModelScope.launch {
