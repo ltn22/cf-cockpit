@@ -1,0 +1,177 @@
+module atmos {
+  yang-version 1.1;
+  namespace "urn:ietf:params:xml:ns:yang:atmos";
+  prefix atmos;
+
+  import coreconf-m2m {
+    prefix ccm2m;
+  }
+
+  organization "METER Group, Inc.";
+  contact
+    "Technical Support
+     https://www.metergroup.com/";
+
+  description
+    "Atmospheric/weather transducer-type identities for use with the
+     coreconf-m2m generic M2M CoMI data model.";
+
+  revision 2026-08-24 {
+    description
+      "Initial revision. Extracted all concrete transducer-type identities
+       from coreconf-m2m: atmospheric/weather (solar-radiation,
+       precipitation, air-temperature, relative-humidity,
+       barometric-pressure, vapor-pressure, wind-speed, wind-direction,
+       wind-gust, north-wind-speed, east-wind-speed), lightning
+       (strike-count, average-distance), orientation (tilt, x-orientation,
+       y-orientation, compass-heading), and humidity-sensor-temperature.
+       coreconf-m2m now only defines the base transducer-type identity;
+       atmos is the product-specific module extending it.
+       Applied the ccm2m:default-unit and ccm2m:default-precision
+       extensions (defined in coreconf-m2m) to each identity, to advertise
+       the recommended SenML (RFC 8428) unit and decimal precision for a
+       transducer of that type.";
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Environmental                                                        */
+  /* ------------------------------------------------------------------ */
+
+  identity solar-radiation {
+    base ccm2m:transducer-type;
+    ccm2m:default-unit "W/m2";
+    ccm2m:default-precision "0";
+    description "Solar radiation measurement (W/m2).";
+  }
+
+  identity precipitation {
+    base ccm2m:transducer-type;
+    ccm2m:default-unit "mm";
+    ccm2m:default-precision "1";
+    description "Precipitation measurement (mm).";
+  }
+
+  identity air-temperature {
+    base ccm2m:transducer-type;
+    ccm2m:default-unit "Cel";
+    ccm2m:default-precision "2";
+    description "Air temperature measurement (°C).";
+  }
+
+  identity relative-humidity {
+    base ccm2m:transducer-type;
+    ccm2m:default-unit "%RH";
+    ccm2m:default-precision "1";
+    description "Relative humidity measurement (%).";
+  }
+
+  identity barometric-pressure {
+    base ccm2m:transducer-type;
+    ccm2m:default-unit "Pa";
+    ccm2m:default-precision "0";
+    description "Barometric pressure measurement (kPa).";
+  }
+
+  identity vapor-pressure {
+    base ccm2m:transducer-type;
+    ccm2m:default-unit "Pa";
+    ccm2m:default-precision "0";
+    description "Vapor pressure measurement (kPa).";
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Wind                                                                 */
+  /* ------------------------------------------------------------------ */
+
+  identity wind-speed {
+    base ccm2m:transducer-type;
+    ccm2m:default-unit "m/s";
+    ccm2m:default-precision "1";
+    description "Horizontal wind speed measurement (m/s).";
+  }
+
+  identity wind-direction {
+    base ccm2m:transducer-type;
+    ccm2m:default-unit "deg";
+    ccm2m:default-precision "0";
+    description "Wind direction measurement (degrees).";
+  }
+
+  identity wind-gust {
+    base ccm2m:transducer-type;
+    ccm2m:default-unit "m/s";
+    ccm2m:default-precision "1";
+    description "Wind gust measurement (m/s).";
+  }
+
+  identity north-wind-speed {
+    base ccm2m:transducer-type;
+    ccm2m:default-unit "m/s";
+    ccm2m:default-precision "1";
+    description "North wind speed component (m/s).";
+  }
+
+  identity east-wind-speed {
+    base ccm2m:transducer-type;
+    ccm2m:default-unit "m/s";
+    ccm2m:default-precision "1";
+    description "East wind speed component (m/s).";
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Lightning                                                            */
+  /* ------------------------------------------------------------------ */
+
+  identity strike-count {
+    base ccm2m:transducer-type;
+    ccm2m:default-unit "count";
+    ccm2m:default-precision "0";
+    description "Lightning strike count.";
+  }
+
+  identity average-distance {
+    base ccm2m:transducer-type;
+    ccm2m:default-unit "km";
+    ccm2m:default-precision "1";
+    description "Average lightning distance (km).";
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Orientation                                                          */
+  /* ------------------------------------------------------------------ */
+
+  identity tilt {
+    base ccm2m:transducer-type;
+    ccm2m:default-unit "deg";
+    ccm2m:default-precision "1";
+    description "Sensor tilt measurement (degrees).";
+  }
+
+  identity x-orientation {
+    base ccm2m:transducer-type;
+    description "X-axis orientation (raw accelerometer data).";
+  }
+
+  identity y-orientation {
+    base ccm2m:transducer-type;
+    description "Y-axis orientation (raw accelerometer data).";
+  }
+
+  identity compass-heading {
+    base ccm2m:transducer-type;
+    ccm2m:default-unit "deg";
+    ccm2m:default-precision "0";
+    description "Compass heading clockwise from north reference (degrees).";
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Internal                                                             */
+  /* ------------------------------------------------------------------ */
+
+  identity humidity-sensor-temperature {
+    base ccm2m:transducer-type;
+    ccm2m:default-unit "Cel";
+    ccm2m:default-precision "2";
+    description "Internal temperature of the humidity sensor (°C).";
+  }
+}
