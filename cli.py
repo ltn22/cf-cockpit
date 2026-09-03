@@ -352,22 +352,21 @@ class CockpitCLI:
 
         f, m_type, unit, precision = self._sensor(idx)
         db_xpath = f"{self.module}:transducers/transducer"
-        xpath = f"/{db_xpath}{f}/quantity"
+        xpath = f"/{db_xpath}{f}/quantity/value"
 
-        # The whole quantity sub-tree comes back — value, timestamp and
-        # timestamp-source; statistics are a sibling now, fetched by cmd_stat.
+        # Only the "value" leaf is fetched: timestamp and timestamp-source
+        # are not needed for a plain refresh, and statistics are a sibling
+        # fetched by cmd_stat.
         target_sid, key_values = self.ds._resolve_path(xpath)
         payload = await self._fetch([target_sid] + key_values)
         decoded = self.model.toJSON(payload, return_pydict=True)
-        quantity = next(iter(decoded.values()), {}) or {}
-
-        raw = quantity.get('value')
+        raw = next(iter(decoded.values()), None)
         if isinstance(raw, str):
             raw = int(raw)
 
-        self.ds[db_xpath + f] = {"quantity": quantity}
+        self.ds[db_xpath + f] = {"quantity": {"value": raw}}
 
-        ts = self._local_time(quantity.get('timestamp'))
+        ts = self._local_time(None)
         print(f"  [{idx}] {m_type}: {self._scaled(raw, unit, precision)}  ({ts})")
         if precision is None:
             print(f"       unknown precision — raw {raw}, not converted.")
