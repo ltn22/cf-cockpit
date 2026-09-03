@@ -455,8 +455,11 @@ class CockpitCLI:
                 print(f"  iPATCH error: {resp.code}")
                 return
 
-            # 2. FETCH+Observe on /s for history/time-series
-            xpath_ts = f"/{self.module}:history/time-series{f}"
+            # 2. FETCH+Observe on /s for the time-series' "values" leaf-list
+            # directly: the subscription is already transducer-specific, so
+            # the "type" field carried by the full time-series entry would
+            # only repeat what the client already knows.
+            xpath_ts = f"/{self.module}:history/time-series{f}/values"
             log.debug("resolving xpath_ts: %s", xpath_ts)
             target_sid_ts, key_values_ts = self.ds._resolve_path(xpath_ts)
             instance_id = [target_sid_ts] + key_values_ts
@@ -490,8 +493,7 @@ class CockpitCLI:
                     payload = payload[ff + 1:]
                 try:
                     new_ds = self.model.create_datastore(payload)
-                    xpath_values = f"/{self.module}:history/time-series{f}/values"
-                    values = new_ds[xpath_values]
+                    values = new_ds[xpath_ts]
                     if not values:
                         return
                     log.debug("raw values: %r", values)
