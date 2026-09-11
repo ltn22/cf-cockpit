@@ -29,8 +29,15 @@ module atmos {
        atmos is the product-specific module extending it.
        Applied the ccm2m:default-unit and ccm2m:default-precision
        extensions (defined in coreconf-m2m) to each identity, to advertise
-       the recommended SenML (RFC 8428) unit and decimal precision for a
-       transducer of that type.";
+       the recommended unit and decimal precision for a transducer of that
+       type. Units are SenML (RFC 8428) strings, except kPa on the two
+       pressures, where the sensor's own unit is kept to avoid a scaling
+       step on the device. Each default-precision is the number of decimals
+       needed to carry the resolution the ATMOS 41 integrator's guide
+       specifies for that measurement — not the number of decimals the
+       SDI-12 response happens to carry, which is sometimes finer than the
+       sensor actually resolves (e.g. solar radiation is transmitted with
+       one decimal but resolves to 1 W/m2).";
   }
 
   /* ------------------------------------------------------------------ */
@@ -39,6 +46,7 @@ module atmos {
 
   identity solar-radiation {
     base ccm2m:transducer-type;
+    ccm2m:default-category "sensor";
     ccm2m:default-unit "W/m2";
     ccm2m:default-precision "0";
     description "Solar radiation measurement (W/m2).";
@@ -46,20 +54,23 @@ module atmos {
 
   identity precipitation {
     base ccm2m:transducer-type;
+    ccm2m:default-category "sensor";
     ccm2m:default-unit "mm";
-    ccm2m:default-precision "1";
-    description "Precipitation measurement (mm).";
+    ccm2m:default-precision "3";
+    description "Precipitation measurement (mm), resolution 0.017 mm.";
   }
 
   identity air-temperature {
     base ccm2m:transducer-type;
+    ccm2m:default-category "sensor";
     ccm2m:default-unit "Cel";
-    ccm2m:default-precision "2";
-    description "Air temperature measurement (°C).";
+    ccm2m:default-precision "1";
+    description "Air temperature measurement (°C), resolution 0.1 °C.";
   }
 
   identity relative-humidity {
     base ccm2m:transducer-type;
+    ccm2m:default-category "sensor";
     ccm2m:default-unit "%RH";
     ccm2m:default-precision "1";
     description "Relative humidity measurement (%).";
@@ -67,16 +78,21 @@ module atmos {
 
   identity barometric-pressure {
     base ccm2m:transducer-type;
-    ccm2m:default-unit "Pa";
-    ccm2m:default-precision "0";
-    description "Barometric pressure measurement (kPa).";
+    ccm2m:default-category "sensor";
+    ccm2m:default-unit "kPa";
+    ccm2m:default-precision "2";
+    description
+      "Barometric pressure measurement (kPa), resolution 0.01 kPa.
+       Reported in kPa, the unit the sensor transmits, rather than the
+       SenML-registered Pa, to avoid a scaling step on the device.";
   }
 
   identity vapor-pressure {
     base ccm2m:transducer-type;
-    ccm2m:default-unit "Pa";
-    ccm2m:default-precision "0";
-    description "Vapor pressure measurement (kPa).";
+    ccm2m:default-category "sensor";
+    ccm2m:default-unit "kPa";
+    ccm2m:default-precision "2";
+    description "Vapor pressure measurement (kPa), resolution 0.01 kPa.";
   }
 
   /* ------------------------------------------------------------------ */
@@ -85,13 +101,15 @@ module atmos {
 
   identity wind-speed {
     base ccm2m:transducer-type;
+    ccm2m:default-category "sensor";
     ccm2m:default-unit "m/s";
-    ccm2m:default-precision "1";
-    description "Horizontal wind speed measurement (m/s).";
+    ccm2m:default-precision "2";
+    description "Horizontal wind speed measurement (m/s), resolution 0.01 m/s.";
   }
 
   identity wind-direction {
     base ccm2m:transducer-type;
+    ccm2m:default-category "sensor";
     ccm2m:default-unit "deg";
     ccm2m:default-precision "0";
     description "Wind direction measurement (degrees).";
@@ -99,23 +117,26 @@ module atmos {
 
   identity wind-gust {
     base ccm2m:transducer-type;
+    ccm2m:default-category "sensor";
     ccm2m:default-unit "m/s";
-    ccm2m:default-precision "1";
-    description "Wind gust measurement (m/s).";
+    ccm2m:default-precision "2";
+    description "Wind gust measurement (m/s), resolution 0.01 m/s.";
   }
 
   identity north-wind-speed {
     base ccm2m:transducer-type;
+    ccm2m:default-category "sensor";
     ccm2m:default-unit "m/s";
-    ccm2m:default-precision "1";
-    description "North wind speed component (m/s).";
+    ccm2m:default-precision "2";
+    description "North wind speed component (m/s), resolution 0.01 m/s.";
   }
 
   identity east-wind-speed {
     base ccm2m:transducer-type;
+    ccm2m:default-category "sensor";
     ccm2m:default-unit "m/s";
-    ccm2m:default-precision "1";
-    description "East wind speed component (m/s).";
+    ccm2m:default-precision "2";
+    description "East wind speed component (m/s), resolution 0.01 m/s.";
   }
 
   /* ------------------------------------------------------------------ */
@@ -124,6 +145,7 @@ module atmos {
 
   identity strike-count {
     base ccm2m:transducer-type;
+    ccm2m:default-category "sensor";
     ccm2m:default-unit "count";
     ccm2m:default-precision "0";
     description "Lightning strike count.";
@@ -131,9 +153,10 @@ module atmos {
 
   identity average-distance {
     base ccm2m:transducer-type;
+    ccm2m:default-category "sensor";
     ccm2m:default-unit "km";
-    ccm2m:default-precision "1";
-    description "Average lightning distance (km).";
+    ccm2m:default-precision "0";
+    description "Average lightning distance (km), resolution 3 km.";
   }
 
   /* ------------------------------------------------------------------ */
@@ -142,6 +165,7 @@ module atmos {
 
   identity tilt {
     base ccm2m:transducer-type;
+    ccm2m:default-category "sensor";
     ccm2m:default-unit "deg";
     ccm2m:default-precision "1";
     description "Sensor tilt measurement (degrees).";
@@ -149,16 +173,19 @@ module atmos {
 
   identity x-orientation {
     base ccm2m:transducer-type;
+    ccm2m:default-category "sensor";
     description "X-axis orientation (raw accelerometer data).";
   }
 
   identity y-orientation {
     base ccm2m:transducer-type;
+    ccm2m:default-category "sensor";
     description "Y-axis orientation (raw accelerometer data).";
   }
 
   identity compass-heading {
     base ccm2m:transducer-type;
+    ccm2m:default-category "sensor";
     ccm2m:default-unit "deg";
     ccm2m:default-precision "0";
     description "Compass heading clockwise from north reference (degrees).";
@@ -170,8 +197,9 @@ module atmos {
 
   identity humidity-sensor-temperature {
     base ccm2m:transducer-type;
+    ccm2m:default-category "sensor";
     ccm2m:default-unit "Cel";
-    ccm2m:default-precision "2";
-    description "Internal temperature of the humidity sensor (°C).";
+    ccm2m:default-precision "1";
+    description "Internal temperature of the humidity sensor (°C), resolution 0.1 °C.";
   }
 }

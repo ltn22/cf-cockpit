@@ -17,6 +17,34 @@ module coreconf-m2m {
     "YANG data model for a generic M2M CoMI weather station.
      This model defines the operational state data for sensor readings.";
 
+  revision 2026-09-01 {
+    description
+      "Move container statistics out of container quantity, making it a
+       sibling of quantity under list transducer. Statistics accumulate
+       over a window and are not part of the current measurement, so
+       nesting them under quantity conflated two different lifetimes and
+       cost one extra level of delta encoding on every statistics access.
+       This reverts the nesting introduced in revision 2026-03-29.";
+  }
+
+  revision 2026-08-28 {
+    description
+      "Rename the 'states' container to 'bootstrap', since it holds
+       operational data determined once at bootstrap time.
+       Split the transducer list: unit-override, precision-override and
+       category-override are moved out of /transducers/transducer into a
+       new /bootstrap/inventory list (also keyed by type). This list
+       describes the fixed configuration of each transducer instance,
+       determined at bootstrap and not expected to change afterwards,
+       separately from the transducer's runtime data (quantity,
+       statistics, notification parameters) which stays in
+       /transducers/transducer.
+       Hoist check-interval from notification-parameters/history and
+       notification-parameters/sensor-alert to notification-parameters:
+       it was defined identically in both containers, and a single
+       CON/NON cadence now applies to both notification streams.";
+  }
+
   revision 2026-08-24 {
     description
       "Remove type from list keys; id alone now identifies a transducer
@@ -38,7 +66,27 @@ module coreconf-m2m {
        extension declared on the transducer's type identity.
        Add default-unit and default-precision extensions, for use by
        product-specific modules (e.g. atmos) annotating the transducer-type
-       identities they define.";
+       identities they define.
+       Add SOSA/SAREF-aligned leafs to the characteristics container
+       (description, manufacturer, model, hosted-by, installation-time);
+       move uptime back into states, as bootstrap operational data.
+       Add default-category extension, for product-specific modules to mark
+       each transducer-type identity as 'sensor', 'actuator' or
+       'sensor-actuator', and a matching category-override leaf on the
+       transducer list for per-instance overrides.
+       Remove u-timestamp: all timestamps are now second-resolution only;
+       sub-second precision would require a model update.
+       Change history/step units from milliseconds to seconds, for the
+       same reason.
+       Add minimal-step leaf in states and a must constraint requiring
+       history/step >= states/minimal-step.
+       Move geo-location from states into characteristics: it is
+       configuration data set once at deployment, not runtime state.
+       Make states/uptime mandatory.
+       Revert the id-based key: transducer, transducers-list/time-series
+       and sensor-alert/target are again keyed on type alone, and the id
+       leaf is removed from all three lists (only one transducer per
+       type is supported).";
   }
 
   revision 2026-06-07 {
@@ -122,6 +170,26 @@ module coreconf-m2m {
        enforced by the schema.";
   }
 
+  extension default-category {
+    argument "category";
+    description
+      "Recommended default value for a transducer's category-override leaf.
+       Extension arguments are plain strings and cannot be constrained to
+       an enumeration by the YANG language itself; the value SHOULD be one
+       of the category-override enums: 'sensor' (the transducer-type
+       identity represents an observed property), 'actuator' (it
+       represents a property acted upon), or 'sensor-actuator' (both).
+       Applied by
+       product-specific modules to the transducer-type identities they
+       define, since this role is a property of the measurement type, not
+       of the device as a whole (a device can carry a mix of sensor- and
+       actuator-typed transducers).
+       For example, in the SOSA/SSN ontology 'sensor' corresponds to
+       sosa:Sensor/sosa:ObservableProperty and 'actuator' to
+       sosa:Actuator; in SAREF they correspond to the SensingFunction and
+       ActuatingFunction classes respectively.";
+  }
+
   /* ------------------------------------------------------------------ */
   /* Measurement-type identity hierarchy                                  */
   /* ------------------------------------------------------------------ */
@@ -156,7 +224,7 @@ module coreconf-m2m {
 
   grouping transducers-list {
     list time-series {
-      key "id";
+      key "type";
       description
         "List of measurements included in this notification.";
 
@@ -165,14 +233,6 @@ module coreconf-m2m {
           base transducer-type;
         }
         description "The type of measurement (e.g., air-temperature).";
-      }
-
-      leaf id {
-        type uint8;
-        description
-          "Instance identifier for this measurement.
-           Uniquely identifies the transducer instance, allowing multiple
-           actuators of the same type to be distinguished.";
       }
 
       leaf-list values {
@@ -188,16 +248,10 @@ module coreconf-m2m {
   /* State data                                                           */
   /* ------------------------------------------------------------------ */
 
-  container state {
+  container bootstrap {
     config false;
     description
-      "Operational state data of the weather station.";
-
-    leaf uptime {
-      type uint64;
-      units "seconds";
-      description "Time elapsed since the last boot.";
-    }
+      "Operational data determined once at bootstrap time.";
 
     leaf reference-epoch {
       type uint64;
@@ -207,78 +261,37 @@ module coreconf-m2m {
          internal clock. Other epoch/timestamp values in this model are
          relative to this reference epoch.";
     }
-  }
 
-  /* ------------------------------------------------------------------ */
-  /* Device Characteristics                                               */
-  /* ------------------------------------------------------------------ */
-
-  container characteristics {
-    description
-      "Static descriptive information about the device.";
-
-    leaf name {
-      type string;
-      description "Human-readable name of the device.";
+    leaf uptime {
+      type uint64;
+      units "seconds";
+      mandatory true;
+      description "Time elapsed since the last boot.";
     }
 
-    leaf version {
-      type string;
-      description "Firmware or software version of the device.";
-    }
-
-    leaf identifier {
-      type string;
-      description "Unique identifier of the device (e.g., serial number or EUI).";
-    }
-
-    /*
-     * Physical location of the station (RFC 9179).
-     *
-     * Default geodetic datum is wgs-84 (GPS).
-     * Latitude and longitude are in decimal degrees (decimal64).
-     * Height is in meters.
-     *
-     * Example CORECONF GET to read position:
-     *   GET </c/SID_geo-location>
-     */
-    uses geo:geo-location {
+    leaf minimal-step {
+      type uint32;
+      units "seconds";
       description
-        "Fixed geographic position of the weather station.
-         Populated once at deployment; not expected to change
-         during normal operation.";
-      refine "geo-location/reference-frame/geodetic-system/geodetic-datum" {
-        default "wgs-84";
-      }
+        "Minimum interval at which the underlying system refreshes
+         transducer values, i.e. the smallest meaningful value for
+         history/step. Determined by the hardware/firmware and not
+         configurable (e.g. an atmospheric station may have a
+         minimal-step of 120 seconds).";
     }
-  }
 
-  /* ------------------------------------------------------------------ */
-  /* Measurements Configuration & Data                                    */
-  /* ------------------------------------------------------------------ */
-
-  container transducers {
-    // config true (default);
-    description
-      "Current measurement values accessible via polling or configuration.";
-
-    list transducer {
-      key "id";
+    list inventory {
+      key "type";
       description
-        "List of available measurements.";
+        "List of transducers known to the device, with their
+         per-instance configuration overrides. Determined once at
+         bootstrap and not expected to change afterwards.";
 
       leaf type {
         type identityref {
           base transducer-type;
         }
         description "The type of measurement.";
-      }
-
-      leaf id {
-        type uint8;
-        description
-          "Instance identifier uniquely identifying this transducer,
-           distinguishing multiple actuators of the same type.";
       }
 
       leaf unit-override {
@@ -304,6 +317,128 @@ module coreconf-m2m {
            the precision is undefined.";
       }
 
+      leaf category-override {
+        type enumeration {
+          enum sensor {
+            description "The transducer represents an observed property.";
+          }
+          enum actuator {
+            description "The transducer represents a property acted upon.";
+          }
+          enum sensor-actuator {
+            description
+              "The transducer both observes and can be acted upon
+               (e.g. a setpoint that also reports the measured value).";
+          }
+        }
+        description
+          "Role of this transducer instance, overriding the
+           default-category extension declared on the transducer's type
+           identity (if any). When absent, clients should use that
+           identity's default-category; if the identity declares no
+           default-category, the role is undefined.";
+      }
+    }
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Device Characteristics                                               */
+  /* ------------------------------------------------------------------ */
+
+  container characteristics {
+    description
+      "Static descriptive information about the device.";
+
+    uses geo:geo-location {
+      description
+        "Fixed geographic position of the weather station.
+         Populated once at deployment; not expected to change
+         during normal operation.";
+      refine "geo-location/reference-frame/geodetic-system/geodetic-datum" {
+        default "wgs-84";
+      }
+    }
+
+    leaf name {
+      type string;
+      description "Human-readable name of the device.";
+    }
+
+    leaf version {
+      type string;
+      description "Firmware or software version of the device.";
+    }
+
+    leaf identifier {
+      type string;
+      description "Unique identifier of the device (e.g., serial number or EUI).";
+    }
+
+    leaf description {
+      type string;
+      description
+        "Free-text description of the device, its purpose or its
+         deployment context. For example, in SOSA/SSN this corresponds to
+         rdfs:comment on the sosa:Sensor/sosa:Platform individual, and in
+         SAREF to saref:hasDescription.";
+    }
+
+    leaf manufacturer {
+      type string;
+      description
+        "Name of the device manufacturer. For example, in SAREF this
+         corresponds to saref:hasManufacturer.";
+    }
+
+    leaf model {
+      type string;
+      description
+        "Commercial model name/number of the device. For example, in
+         SAREF this corresponds to saref:hasModel.";
+    }
+
+    leaf hosted-by {
+      type string;
+      description
+        "Identifier of the platform hosting this device, when applicable.
+         Left as an opaque string here; resolution to an actual platform
+         resource is deployment-specific. For example, in SOSA this
+         corresponds to the sosa:isHostedBy relation
+         (device -> sosa:Platform).";
+    }
+
+    leaf installation-time {
+      type uint64;
+      units "seconds";
+      description
+        "Absolute Unix epoch timestamp (UTC) at which the device was
+         installed/commissioned. Unlike bootstrap/reference-epoch, this is
+         an absolute epoch value, not a relative reference point for the
+         device's internal clock.";
+    }
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Measurements Configuration & Data                                    */
+  /* ------------------------------------------------------------------ */
+
+  container transducers {
+    // config true (default);
+    description
+      "Current measurement values accessible via polling or configuration.";
+
+    list transducer {
+      key "type";
+      description
+        "List of available measurements.";
+
+      leaf type {
+        type identityref {
+          base transducer-type;
+        }
+        description "The type of measurement.";
+      }
+
       container quantity {
         config false;
         description "Operational state for this transducer.";
@@ -318,13 +453,6 @@ module coreconf-m2m {
           type uint64;
           units "seconds";
           description "Epoch timestamp (seconds) of the last transducer update.";
-        }
-
-        leaf u-timestamp {
-          type uint32;
-          units "microseconds";
-          description
-            "Microsecond fraction of the timestamp (0..999999).";
         }
 
         leaf timestamp-source {
@@ -343,45 +471,45 @@ module coreconf-m2m {
           description
             "Indicates the origin of the timestamp associated with this measurement.";
         }
+      }
 
-        container statistics {
-          config false;
-          description "Read-only accumulated statistics for this measurement.";
+      container statistics {
+        config false;
+        description "Read-only accumulated statistics for this measurement.";
 
-          leaf min {
-            type int64;
-            description "Minimum value observed since last reset.";
-          }
+        leaf min {
+          type int64;
+          description "Minimum value observed since last reset.";
+        }
 
-          leaf max {
-            type int64;
-            description "Maximum value observed since last reset.";
-          }
+        leaf max {
+          type int64;
+          description "Maximum value observed since last reset.";
+        }
 
-          leaf mean {
-            type int64;
-            description "Mean value observed since last reset.";
-          }
+        leaf mean {
+          type int64;
+          description "Mean value observed since last reset.";
+        }
 
-          leaf median {
-            type int64;
-            description
-              "Estimated median value observed since last reset.
-               This median is computed incrementally from the current stored
-               statistics and the newest sample, without keeping full history.";
-          }
+        leaf median {
+          type int64;
+          description
+            "Estimated median value observed since last reset.
+             This median is computed incrementally from the current stored
+             statistics and the newest sample, without keeping full history.";
+        }
 
-          leaf stdev {
-            type uint64;
-            description
-              "Standard deviation of values observed since last reset.
-               Scaled by same precision as value.";
-          }
+        leaf stdev {
+          type uint64;
+          description
+            "Standard deviation of values observed since last reset.
+             Scaled by same precision as value.";
+        }
 
-          leaf sample-count {
-            type uint64;
-            description "Number of samples used for statistics calculation.";
-          }
+        leaf sample-count {
+          type uint64;
+          description "Number of samples used for statistics calculation.";
         }
       }
 
@@ -403,8 +531,15 @@ module coreconf-m2m {
 
           leaf step {
             type uint32;
-            units "milliseconds";
-            description "Time interval between samples in the notification stream.";
+            units "seconds";
+            must ". >= /bootstrap/minimal-step or not(/bootstrap/minimal-step)" {
+              error-message
+                "step must be greater than or equal to bootstrap/minimal-step.";
+            }
+            description
+              "Time interval between samples in the notification stream.
+               Must be at least bootstrap/minimal-step, the system's minimum
+               refresh interval.";
           }
 
           leaf precision {
@@ -442,16 +577,6 @@ module coreconf-m2m {
                max-samples or time-period is reached).  0 means no size limit.";
           }
 
-          leaf check-interval {
-            type uint16;
-            default 0;
-            description
-              "Controls how often a CON (confirmable) notification is sent
-               instead of NON (non-confirmable).
-               0 = disabled, all notifications are NON.
-               1 = every notification is CON.
-               N = one CON every N notifications, all others are NON.";
-          }
         }
 
         container sensor-alert {
@@ -504,17 +629,18 @@ module coreconf-m2m {
                until the dampening period has expired since the last sent alert.
                0 (default) means no dampening.";
           }
+        }
 
-          leaf check-interval {
-            type uint16;
-            default 0;
-            description
-              "Controls how often a CON (confirmable) notification is sent
-               instead of NON (non-confirmable).
-               0 = disabled, all notifications are NON.
-               1 = every notification is CON.
-               N = one CON every N notifications, all others are NON.";
-          }
+        leaf check-interval {
+          type uint16;
+          default 0;
+          description
+            "Controls how often a CON (confirmable) notification is sent
+             instead of NON (non-confirmable), for both the history and
+             sensor-alert streams of this transducer.
+             0 = disabled, all notifications are NON.
+             1 = every notification is CON.
+             N = one CON every N notifications, all others are NON.";
         }
       }
 
@@ -579,17 +705,13 @@ module coreconf-m2m {
       "Alert notification when a value exceeds a threshold.";
 
     list target {
-      key "id";
+      key "type";
       description "Measurement instances that triggered this alert.";
 
       leaf type {
         type identityref {
           base transducer-type;
         }
-      }
-
-      leaf id {
-        type uint8;
       }
 
       leaf value {
