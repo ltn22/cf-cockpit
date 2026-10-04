@@ -249,8 +249,22 @@ class CockpitCLI:
         print(f"  {'SID':>9}  {'Identity':<34} {'Module':<14} {'Unit':<8} {'Prec.':>6}  Category")
         print("  " + "─" * 92)
 
+        unknown = []
+
         for f in self.ds.predicates(inv) or []:
             entry = self.ds[inv + f]
+            if entry is None:
+                # No loaded SID file claims this identity: pycoreconf keeps the
+                # raw SID in the key (e.g. [type='10000203']) but cannot resolve
+                # the entry. Keep the SID as is rather than failing, so a device
+                # may announce a module this client has not got yet.
+                raw = re.fullmatch(r"\[type='(\d+)'\]", f)
+                sid = int(raw.group(1)) if raw else None
+                filters.append(f)
+                print(f"  {sid if sid is not None else '?':>9}  {'(unknown SID)':<34} "
+                      f"{'?':<14} {'—':<8} {'—':>6}  —")
+                unknown.append(sid)
+                continue
             identity = entry.get('type', '')
             # Address entries by their module-qualified identity: the short
             # form predicates() returns cannot be encoded back into a SID.
@@ -291,6 +305,10 @@ class CockpitCLI:
         print("    The inventory completed this way stays local: bootstrap is config false and "
               "is never sent back.")
 
+        for sid in unknown:
+            print(f"  Warning: SID {sid} — no loaded SID file covers it; load the .sid of "
+                  f"its module to get its identity, unit and precision. Values ignored.")
+
         for sid, identity in unresolved:
             print(f"  Warning: SID {sid} ({identity}) — no precision-override and no "
                   f"default-precision; values ignored.")
@@ -306,6 +324,10 @@ class CockpitCLI:
         """
         f = self.filters[idx - 1]
         entry = self.ds[f"/{self.module}:bootstrap/inventory{f}"]
+        if entry is None:
+            # SID of a module that is not loaded: only the raw SID is known
+            raw = re.fullmatch(r"\[type='(\d+)'\]", f)
+            return f, (raw.group(1) if raw else '?'), '', None
         return (f,
                 entry.get('type', '?').split(':')[-1],
                 entry.get('unit-override', ''),
