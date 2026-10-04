@@ -512,7 +512,7 @@ class CockpitCLI:
         # fetched by cmd_stat.
         target_sid, key_values = self.ds._resolve_xpath(xpath)
         payload = await self._fetch([target_sid] + key_values)
-        decoded = self.model.toJSON(payload, return_pydict=True)
+        decoded = self.model.decode(payload)
         raw = next(iter(decoded.values()), None)
         if isinstance(raw, str):
             raw = int(raw)
@@ -534,7 +534,7 @@ class CockpitCLI:
 
         target_sid, key_values = self.ds._resolve_xpath(xpath)
         payload = await self._fetch([target_sid] + key_values)
-        data = self.model.toJSON(payload, return_pydict=True)
+        data = self.model.decode(payload)
         stats = next(iter(data.values()), {}) or {}
 
         self.ds[db_xpath + f] = {'statistics': stats}
@@ -591,7 +591,7 @@ class CockpitCLI:
                 'encoding': 'delta',
             }}
             ipatch_payload = cbor.dumps({tuple(ipatch_key): cbor.loads(
-                self.model.toCORECONF(json.dumps(qualified_payload))
+                self.model.encode(qualified_payload)
             )})
 
             patch_req = aiocoap.Message(
