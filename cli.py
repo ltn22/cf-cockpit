@@ -656,12 +656,19 @@ class CockpitCLI:
                             acc += v
                             decoded.append(acc)
                         values = decoded
-                    ts = time.strftime('%H:%M:%S')
+                    # The series is sent when its last sample is taken: that one is stamped
+                    # with the time of arrival, and each earlier one is one step older.
+                    now = time.time()
+
+                    def _ts(age):
+                        return time.strftime('%H:%M:%S', time.localtime(now - age))
+
                     if isinstance(values, list):
-                        for v in values:
+                        for i, v in enumerate(values):
+                            ts = _ts((len(values) - 1 - i) * step)
                             print(f"  [{idx}] {m_type}: {self._scaled(v, unit, precision)}  ({ts})")
                     elif values is not None:
-                        print(f"  [{idx}] {m_type}: {self._scaled(values, unit, precision)}  ({ts})")
+                        print(f"  [{idx}] {m_type}: {self._scaled(values, unit, precision)}  ({_ts(0)})")
                 except Exception as e:
                     log.debug("decode error:", exc_info=True)
                     print(f"  [{idx}] notification decode error: {e}")
