@@ -1,21 +1,34 @@
 #!/usr/bin/env python3
-"""Cockpit CLI — command-line interface for sensor monitoring."""
+"""Cockpit CLI — command-line interface for sensor monitoring.
 
-__version__ = "1.6.0"
+Unknown transducer types are looked up in the DNS. When the device announces a
+SID that no --model file covers (e.g. 10000203, a BME280), the client asks
+sid.yt (the `dig` command must be installed), downloads the module's .sid
+(repository= key) and .yang (yang= key) and keeps them in
+$XDG_CACHE_HOME/cockpit/sid (default ~/.cache/cockpit/sid). The YANG gives the
+default unit, precision and category of each identity. If the DNS cannot be
+reached, a copy kept from an earlier run is used; delete the folder to start
+over. A SID that stays unknown is listed as such and its values are ignored.
+"""
+
+__version__ = "1.7.0"
 
 import asyncio
 import argparse
 import json
 import logging
+import os
 import re
 import time
 import sys
+import urllib.request
 from pathlib import Path
 
 import aiocoap
 
 import cbor2 as cbor
 from pycoreconf import CORECONFModel
+from pycoreconf.sid_dns import query_sid as dns_query_sid
 
 
 # Two modules are needed: coreconf-m2m carries the structure (containers,
@@ -29,6 +42,21 @@ DEFAULT_SID_FILES = ["coreconf-m2m@2026-09-01", "atmos@2026-08-24"]
 # statements (no nested braces), which keeps the parsing to one regex.
 _IDENTITY_RE = re.compile(r"identity\s+([\w.-]+)\s*\{([^}]*)\}", re.S)
 _DEFAULT_EXT_RE = re.compile(r"ccm2m:(default-unit|default-precision|default-category)\s+\"([^\"]*)\"")
+
+
+# SID and YANG files learned through the DNS (sid.yt) are kept here.
+SID_CACHE_DIR = (Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+                 / "cockpit" / "sid")
+
+
+def _download(url: str, timeout: float = 10.0) -> bytes:
+    with urllib.request.urlopen(url, timeout=timeout) as resp:
+        return resp.read()
+
+
+def _derive_yang_url(sid_url: str) -> str | None:
+    """The .yang next to a .sid URL — used when the DNS carries no yang= key."""
+    return sid_url[:-len(".sid")] + ".yang" if sid_url.endswith(".sid") else None
 
 
 def _no_data(precision: int | None) -> str:
@@ -50,20 +78,90 @@ class SidCatalog:
 
     def __init__(self, sid_files: list[str]):
         self.modules = []  # one record per SID file, in load order
-        for path in sid_files:
-            meta = json.loads(Path(path).read_text())
-            meta = meta.get("ietf-sid-file:sid-file", meta)
-            self.modules.append({
-                "path": Path(path),
-                "name": meta.get("module-name", ""),
-                "revision": meta.get("module-revision", ""),
-                # entry-point and size are JSON strings, not numbers.
-                "ranges": [(int(r["entry-point"]), int(r["entry-point"]) + int(r["size"]))
-                           for r in meta.get("assignment-range", [])],
-                "dependencies": {d["module-name"]: d["module-revision"]
-                                 for d in meta.get("dependency-revision", [])},
-            })
         self._defaults = {}  # module name -> {identity: {...}}, parsed on demand
+        for path in sid_files:
+            self._add(path)
+
+    def _add(self, path) -> dict:
+        """Read one SID file and register the module it describes."""
+        meta = json.loads(Path(path).read_text())
+        meta = meta.get("ietf-sid-file:sid-file", meta)
+        self.modules.append({
+            "path": Path(path),
+            "name": meta.get("module-name", ""),
+            "revision": meta.get("module-revision", ""),
+            # entry-point and size are JSON strings, not numbers.
+            "ranges": [(int(r["entry-point"]), int(r["entry-point"]) + int(r["size"]))
+                       for r in meta.get("assignment-range", [])],
+            "dependencies": {d["module-name"]: d["module-revision"]
+                             for d in meta.get("dependency-revision", [])},
+        })
+        return self.modules[-1]
+
+    def learn(self, sid: int, cache_dir: Path = SID_CACHE_DIR) -> dict | None:
+        """
+        Find the module owning *sid* in the DNS and make it available locally.
+
+        Asks sid.yt for the SID, downloads the .sid (repository= key) and the
+        .yang (yang= key, else the repository URL with .yang for .sid) into
+        *cache_dir* under their canonical name, and registers the module. When
+        the DNS or the download fails, a copy kept from an earlier run is used.
+        Returns the module record, or None when the SID stays unknown.
+        """
+        if self.module_of(sid) is not None:
+            return None
+
+        def covers(meta: dict) -> bool:
+            return any(int(r["entry-point"]) <= sid < int(r["entry-point"]) + int(r["size"])
+                       for r in meta.get("assignment-range", []))
+
+        result = dns_query_sid(sid)
+        fields = result.get("fields", {})
+        sid_url = fields.get("repository")
+        if result.get("status") == "registered" and sid_url:
+            try:
+                sid_bytes = _download(sid_url)
+                meta = json.loads(sid_bytes)
+                meta = meta.get("ietf-sid-file:sid-file", meta)
+                if not covers(meta):
+                    raise ValueError(f"{sid_url} does not assign SID {sid}")
+                name, revision = meta["module-name"], meta["module-revision"]
+                cache_dir.mkdir(parents=True, exist_ok=True)
+                sid_path = cache_dir / f"{name}@{revision}.sid"
+                sid_path.write_bytes(sid_bytes)
+
+                yang_url = fields.get("yang") or _derive_yang_url(sid_url)
+                yang_note = "no yang= key and no .sid URL to derive it from"
+                if yang_url:
+                    try:
+                        yang_bytes = _download(yang_url)
+                        (cache_dir / f"{name}@{revision}.yang").write_bytes(yang_bytes)
+                        found = re.search(r"revision\s+(\d{4}-\d{2}-\d{2})", yang_bytes.decode())
+                        yang_note = yang_url
+                        if found and found.group(1) != revision:
+                            yang_note += (f"  (warning: its latest revision is {found.group(1)}, "
+                                          f"the SID file is {revision})")
+                    except Exception as e:
+                        yang_note = f"{yang_url} could not be downloaded ({e})"
+                print(f"  DNS: SID {sid} → {result['fqdn']}")
+                print(f"       {name}@{revision}.sid  ← {sid_url}")
+                print(f"       {name}@{revision}.yang ← {yang_note}")
+                return self._add(sid_path)
+            except Exception as e:
+                print(f"  DNS: SID {sid} resolved but its files could not be loaded: {e}")
+        else:
+            print(f"  DNS: SID {sid} → {result.get('fqdn')}: {result.get('status')}")
+
+        # DNS unavailable or the module not published: reuse a copy from a previous run
+        for path in sorted(cache_dir.glob("*.sid")):
+            try:
+                meta = json.loads(path.read_text())
+                if covers(meta.get("ietf-sid-file:sid-file", meta)):
+                    print(f"  cache: SID {sid} → {path}")
+                    return self._add(path)
+            except Exception:
+                continue
+        return None
 
     def module_of(self, sid: int | None) -> dict | None:
         """The module whose assignment-range covers *sid*."""
@@ -186,6 +284,7 @@ class CockpitCLI:
 
     async def init(self):
         paths = [f if f.endswith('.sid') else f"{f}.sid" for f in self.sid_files]
+        self.sid_paths = list(paths)  # grows when a module is learned through the DNS
         self.catalog = SidCatalog(paths)
         self.catalog.check_dependencies()
         self.model = CORECONFModel(paths)
@@ -204,7 +303,8 @@ class CockpitCLI:
         self.catalog.describe()
 
         payload = await self._fetch(self.model.sids[f"/{self.module}:bootstrap"])
-        self.ds = self.model.create_datastore(payload)
+        self.ds = self.model.create_datastore_from_cbor(payload)
+        self._learn_from_dns(payload)
 
         self.reference_epoch = self._leaf(f"/{self.module}:bootstrap/reference-epoch", 0)
         self.minimal_step = self._leaf(f"/{self.module}:bootstrap/minimal-step", 1) or 1
@@ -220,6 +320,37 @@ class CockpitCLI:
 
         self.filters = self._hydrate_inventory()
         return self.filters
+
+    def _unknown_identity_sids(self) -> list[int]:
+        """Transducer types of the inventory that no loaded SID file explains.
+
+        The datastore keeps such a type as a bare number in the entry key
+        ([type='10000203']) instead of an identity name."""
+        inv = f"/{self.module}:bootstrap/inventory"
+        found = []
+        for f in self.ds.predicates(inv) or []:
+            raw = re.fullmatch(r"\[type='(\d+)'\]", f)
+            if raw:
+                found.append(int(raw.group(1)))
+        return found
+
+    def _learn_from_dns(self, payload: bytes):
+        """
+        Look the unknown transducer types up in the DNS (sid.yt), download the
+        .sid and .yang of their modules, and decode the answer again with them.
+        """
+        unknown = self._unknown_identity_sids()
+        if not unknown:
+            return
+        print("\n  Inventory SIDs not covered by the loaded models: "
+              + ", ".join(str(s) for s in unknown))
+        learned = [m for m in (self.catalog.learn(sid) for sid in unknown) if m]
+        if not learned:
+            return
+        self.sid_paths += [str(m["path"]) for m in learned]
+        self.model = CORECONFModel(self.sid_paths)
+        self.module = self._structure_module()
+        self.ds = self.model.create_datastore_from_cbor(payload)
 
     def _leaf(self, xpath: str, default):
         try:
@@ -379,7 +510,7 @@ class CockpitCLI:
         # Only the "value" leaf is fetched: timestamp and timestamp-source
         # are not needed for a plain refresh, and statistics are a sibling
         # fetched by cmd_stat.
-        target_sid, key_values = self.ds._resolve_path(xpath)
+        target_sid, key_values = self.ds._resolve_xpath(xpath)
         payload = await self._fetch([target_sid] + key_values)
         decoded = self.model.toJSON(payload, return_pydict=True)
         raw = next(iter(decoded.values()), None)
@@ -401,7 +532,7 @@ class CockpitCLI:
         db_xpath = f"{self.module}:transducers/transducer"
         xpath = f"/{db_xpath}{f}/statistics"
 
-        target_sid, key_values = self.ds._resolve_path(xpath)
+        target_sid, key_values = self.ds._resolve_xpath(xpath)
         payload = await self._fetch([target_sid] + key_values)
         data = self.model.toJSON(payload, return_pydict=True)
         stats = next(iter(data.values()), {}) or {}
@@ -452,7 +583,7 @@ class CockpitCLI:
 
             # 1. iPATCH — activate history notification on the sensor
             xpath_hist = f"/{db_xpath}{f}/notification-parameters/history"
-            target_sid, key_values = self.ds._resolve_path(xpath_hist)
+            target_sid, key_values = self.ds._resolve_xpath(xpath_hist)
             ipatch_key = [target_sid] + key_values
 
             qualified_payload = {db_xpath + '/notification-parameters/history': {
@@ -483,7 +614,7 @@ class CockpitCLI:
             # only repeat what the client already knows.
             xpath_ts = f"/{self.module}:history/time-series{f}/values"
             log.debug("resolving xpath_ts: %s", xpath_ts)
-            target_sid_ts, key_values_ts = self.ds._resolve_path(xpath_ts)
+            target_sid_ts, key_values_ts = self.ds._resolve_xpath(xpath_ts)
             instance_id = [target_sid_ts] + key_values_ts
 
             obs_req = aiocoap.Message(transport_tuning=aiocoap.Unreliable, code=aiocoap.FETCH,
@@ -514,7 +645,7 @@ class CockpitCLI:
                 if ff >= 0:
                     payload = payload[ff + 1:]
                 try:
-                    new_ds = self.model.create_datastore(payload)
+                    new_ds = self.model.create_datastore_from_cbor(payload)
                     values = new_ds[xpath_ts]
                     if not values:
                         return
@@ -687,7 +818,8 @@ def main():
     parser.add_argument("--host",  default="[::1]",                  help="CoAP host (default: [::1])")
     parser.add_argument("--port",  type=int, default=None,           help="CoAP port")
     parser.add_argument("--model", nargs="+", default=DEFAULT_SID_FILES,
-                        help="YANG/SID models to load (structure then identities)")
+                        help="YANG/SID models to load (structure then identities); modules of "
+                         "unknown transducer types are fetched through the DNS")
     parser.add_argument("--timeout", type=float, default=10.0,          help="CoAP timeout in seconds (default: 10)")
     parser.add_argument("-v", "--verbose", action="store_true",         help="Verbose logs")
     args = parser.parse_args()

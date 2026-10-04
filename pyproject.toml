@@ -11,5 +11,5 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-pycoreconf = { git = "https://github.com/ltn22/pycoreconf.git", rev = "create_xpath" }
+pycoreconf = { git = "https://github.com/ltn22/pycoreconf.git", rev = "9a2134bffbd78c929b61f176d0ba3986069bb9a9" }
 aiocoap = { git = "https://github.com/ltn22/aiocoap.git" }
