@@ -734,7 +734,7 @@ class CockpitCLI:
 
             # 1. iPATCH — set the thresholds on the sensor
             xpath_alert = f"/{db_xpath}{f}/notification-parameters/sensor-alert"
-            target_sid, key_values = self.ds._resolve_path(xpath_alert)
+            target_sid, key_values = self.ds._resolve_xpath(xpath_alert)
             ipatch_key = [target_sid] + key_values
 
             qualified_payload = {db_xpath + '/notification-parameters/sensor-alert': {
@@ -761,7 +761,7 @@ class CockpitCLI:
             # 2. FETCH+Observe on /s for the sensor-alert notification's value
             xpath_val = f"/{self.module}:sensor-alert/target{f}/value"
             log.debug("resolving xpath_val: %s", xpath_val)
-            target_sid_v, key_values_v = self.ds._resolve_path(xpath_val)
+            target_sid_v, key_values_v = self.ds._resolve_xpath(xpath_val)
 
             obs_req = aiocoap.Message(transport_tuning=aiocoap.Unreliable, code=aiocoap.FETCH,
                                       payload=cbor.dumps([target_sid_v] + key_values_v))
