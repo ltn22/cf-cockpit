@@ -842,7 +842,7 @@ class CockpitCLI:
               f"minimal step {self.minimal_step} s.")
         self.cmd_list()
         print("Commands: list, refresh N, stat N, follow N [step] [n], alert N min max, stop N, quit"
-              "  (or: l, r N, s N, f N, q)")
+              "  (or: l, r N, s N, f N, a N min max, q)")
 
         loop = asyncio.get_event_loop()
         while True:
@@ -918,7 +918,7 @@ class CockpitCLI:
                 except Exception as e:
                     print(f"  Error: {e}")
 
-            elif cmd == 'alert':
+            elif cmd in ('alert', 'a'):
                 if len(parts) < 4:
                     print("  Usage: alert N min max")
                     continue
@@ -954,7 +954,7 @@ class CockpitCLI:
                 print("  stat N                — statistics for sensor N")
                 print("  follow N [step] [n]   — observe sensor N in the background")
                 print("                          step in seconds (default: minimal-step)")
-                print("  alert N min max       — set thresholds on sensor N and print alerts as they arrive")
+                print("  alert / a N min max   — set thresholds on sensor N and print alerts as they arrive")
                 print("                          min/max in the sensor's unit")
                 print("  stop N / uf N         — stop the observations (sends RST)")
                 print("  quit / q              — quit")
