@@ -789,7 +789,7 @@ class CockpitCLI:
                 if not payload:
                     return
                 try:
-                    value = self.model.create_datastore(payload)[xpath_val]
+                    value = self.model.create_datastore_from_cbor(payload)[xpath_val]
                     if value is None:
                         return
                     values = value if isinstance(value, list) else [value]
