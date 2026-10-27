@@ -250,6 +250,7 @@ class CockpitCLI:
         self.reference_epoch = 0      # bootstrap/reference-epoch
         self.minimal_step = 1         # bootstrap/minimal-step, in seconds
         self._follow_tasks = {}  # idx -> asyncio.Task
+        self._alert_tasks = {}   # idx -> asyncio.Task
 
     def _structure_module(self) -> str:
         """The module defining the data tree, as opposed to the identity modules."""
@@ -554,13 +555,15 @@ class CockpitCLI:
         print()
 
     async def cmd_stop(self, idx: int):
-        """Stop the observation: cancel locally, aiocoap sends RST on the next notification."""
-        task = self._follow_tasks.pop(idx, None)
-        if task is None or task.done():
+        """Stop the observations of sensor idx: cancel locally, aiocoap sends RST on the next notification."""
+        stopped = False
+        for tasks in (self._follow_tasks, self._alert_tasks):
+            task = tasks.pop(idx, None)
+            if task is not None and not task.done():
+                task.cancel()
+                stopped = True
+        if not stopped:
             print(f"  Sensor {idx} not observed.")
-            return
-        task.cancel()
-        print(f"  [{idx}] Observation stopped.")
 
     async def cmd_follow(self, idx: int, step: int | None = None, max_samples: int = 3):
         if not self._check_idx(idx):
@@ -703,6 +706,123 @@ class CockpitCLI:
                     pass
             print(f"  [{idx}] Observation stopped.")
 
+    async def cmd_alert(self, idx: int, t_min: float, t_max: float):
+        """
+        Set the sensor-alert thresholds of sensor idx, then observe the alert
+        stream. Every notification is printed as soon as it arrives.
+
+        t_min and t_max are in the sensor's unit; the device stores them as
+        integers at the sensor's precision.
+        """
+        if not self._check_idx(idx):
+            return
+
+        log = logging.getLogger(f"alert[{idx}]")
+        obs = None
+
+        try:
+            f, m_type, unit, precision = self._sensor(idx)
+            if precision is None:
+                print(f"  [{idx}] unknown precision — thresholds cannot be converted.")
+                return
+            if t_min >= t_max:
+                print("  Error: min must be strictly less than max.")
+                return
+            raw_min = round(t_min * 10 ** precision)
+            raw_max = round(t_max * 10 ** precision)
+            db_xpath = f"{self.module}:transducers/transducer"
+
+            # 1. iPATCH — set the thresholds on the sensor
+            xpath_alert = f"/{db_xpath}{f}/notification-parameters/sensor-alert"
+            target_sid, key_values = self.ds._resolve_path(xpath_alert)
+            ipatch_key = [target_sid] + key_values
+
+            qualified_payload = {db_xpath + '/notification-parameters/sensor-alert': {
+                't-min': raw_min, 't-max': raw_max,
+            }}
+            ipatch_payload = cbor.dumps({tuple(ipatch_key): cbor.loads(
+                self.model.toCORECONF(json.dumps(qualified_payload))
+            )})
+
+            patch_req = aiocoap.Message(
+                transport_tuning=aiocoap.Unreliable,
+                code=aiocoap.numbers.codes.Code(7),  # iPATCH
+                payload=ipatch_payload,
+            )
+            patch_req.opt.uri_path = ('c',)
+            patch_req.opt.content_format = 140
+            patch_req.unresolved_remote = self._remote()
+
+            resp = await asyncio.wait_for(self.protocol.request(patch_req).response, timeout=self.timeout)
+            if not resp.code.is_successful():
+                print(f"  iPATCH error: {resp.code}")
+                return
+
+            # 2. FETCH+Observe on /s for the sensor-alert notification's value
+            xpath_val = f"/{self.module}:sensor-alert/target{f}/value"
+            log.debug("resolving xpath_val: %s", xpath_val)
+            target_sid_v, key_values_v = self.ds._resolve_path(xpath_val)
+
+            obs_req = aiocoap.Message(transport_tuning=aiocoap.Unreliable, code=aiocoap.FETCH,
+                                      payload=cbor.dumps([target_sid_v] + key_values_v))
+            obs_req.opt.uri_path = ('s',)
+            obs_req.opt.content_format = 140
+            obs_req.opt.accept = 140
+            obs_req.opt.observe = 0
+            obs_req.unresolved_remote = self._remote()
+
+            obs = self.protocol.request(obs_req, handle_blockwise=False)
+            first = await asyncio.wait_for(obs.response, timeout=self.timeout)
+            if not first.code.is_successful():
+                print(f"  Observe error: {first.code}")
+                return
+
+            print(f"  [{idx}] {m_type} alert armed: "
+                  f"{self._scaled(raw_min, unit, precision)} < value < "
+                  f"{self._scaled(raw_max, unit, precision)}")
+
+            def _print_alert(payload):
+                log.debug("alert notification: %d bytes payload=%s", len(payload), payload.hex())
+                ff = payload.find(b'\xff')
+                if ff >= 0:
+                    payload = payload[ff + 1:]
+                if not payload:
+                    return
+                try:
+                    value = self.model.create_datastore(payload)[xpath_val]
+                    if value is None:
+                        return
+                    values = value if isinstance(value, list) else [value]
+                    ts = time.strftime('%H:%M:%S')
+                    for v in values:
+                        print(f"\a  [{idx}] ALERT {m_type}: {self._scaled(v, unit, precision)}  ({ts})")
+                except Exception as e:
+                    log.debug("decode error:", exc_info=True)
+                    print(f"  [{idx}] alert decode error: {e}")
+
+            _print_alert(first.payload)  # empty first response is silently skipped
+
+            async for resp in obs.observation:
+                _print_alert(resp.payload)
+
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            log.debug("cmd_alert error:", exc_info=True)
+            print(f"  [{idx}] error: {e}")
+        finally:
+            if obs is not None:
+                if obs.observation is not None:
+                    try:
+                        obs.observation.cancel()
+                    except Exception:
+                        pass
+                try:
+                    obs._stop_interest()
+                except Exception:
+                    pass
+            print(f"  [{idx}] Alert observation stopped.")
+
     # ------------------------------------------------------------------ #
     # REPL                                                                 #
     # ------------------------------------------------------------------ #
@@ -721,7 +841,7 @@ class CockpitCLI:
         print(f"Connected. {len(self.filters)} sensor(s) discovered, "
               f"minimal step {self.minimal_step} s.")
         self.cmd_list()
-        print("Commands: list, refresh N, stat N, follow N [step] [n], stop N, quit"
+        print("Commands: list, refresh N, stat N, follow N [step] [n], alert N min max, stop N, quit"
               "  (or: l, r N, s N, f N, q)")
 
         loop = asyncio.get_event_loop()
@@ -798,6 +918,27 @@ class CockpitCLI:
                 except Exception as e:
                     print(f"  Error: {e}")
 
+            elif cmd == 'alert':
+                if len(parts) < 4:
+                    print("  Usage: alert N min max")
+                    continue
+                try:
+                    n = int(parts[1])
+                    t_min, t_max = float(parts[2]), float(parts[3])
+                    if n in self._alert_tasks and not self._alert_tasks[n].done():
+                        print(f"  Sensor {n} alert already active (stop {n} first).")
+                    else:
+                        task = asyncio.ensure_future(self.cmd_alert(n, t_min, t_max))
+                        def _on_alert_done(t, _idx=n):
+                            if not t.cancelled() and t.exception():
+                                print(f"  [{_idx}] task error: {t.exception()!r}")
+                        task.add_done_callback(_on_alert_done)
+                        self._alert_tasks[n] = task
+                except ValueError:
+                    print(f"  Invalid argument: {' '.join(parts[1:])}")
+                except Exception as e:
+                    print(f"  Error: {e}")
+
             elif cmd in ('unfollow', 'uf'):
                 if len(parts) < 2:
                     print("  Usage: unfollow N")
@@ -813,7 +954,9 @@ class CockpitCLI:
                 print("  stat N                — statistics for sensor N")
                 print("  follow N [step] [n]   — observe sensor N in the background")
                 print("                          step in seconds (default: minimal-step)")
-                print("  stop N / uf N         — stop the observation (sends RST)")
+                print("  alert N min max       — set thresholds on sensor N and print alerts as they arrive")
+                print("                          min/max in the sensor's unit")
+                print("  stop N / uf N         — stop the observations (sends RST)")
                 print("  quit / q              — quit")
 
             else:
