@@ -741,7 +741,7 @@ class CockpitCLI:
                 't-min': raw_min, 't-max': raw_max,
             }}
             ipatch_payload = cbor.dumps({tuple(ipatch_key): cbor.loads(
-                self.model.toCORECONF(json.dumps(qualified_payload))
+                self.model.encode(qualified_payload)
             )})
 
             patch_req = aiocoap.Message(
